@@ -15,13 +15,48 @@ A professional web-based interface for managing and monitoring your OpenAlgo sca
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Option 1: Docker (Recommended) 🐳
+
+**Fastest way to get started!**
+
+```bash
+# 1. Create .env file with your credentials
+cat > .env << EOF
+OPENALGO_API_KEY=your_api_key_here
+OPENALGO_API_HOST=https://api.openalgo.in
+SYMBOL=NIFTY
+LOTS=2
+EOF
+
+# 2. Start with Docker Compose
+docker-compose up -d
+
+# 3. Access the UI
+# Open browser: http://localhost:7777
+
+# 4. View logs
+docker-compose logs -f
+
+# 5. Stop
+docker-compose down
+```
+
+**Benefits:**
+- ✅ No Python installation needed
+- ✅ Consistent environment
+- ✅ Easy deployment
+- ✅ Automatic restarts
+- ✅ Resource limits
+
+### Option 2: Local Installation
+
+#### 1. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+#### 2. Configure Environment
 
 Create a `.env` file with your OpenAlgo credentials:
 
@@ -34,10 +69,10 @@ OPENALGO_WS_URL=wss://api.openalgo.in/ws  # Optional
 SYMBOL=NIFTY
 EXCHANGE=NSE_INDEX
 LOTS=2
-TRADE_DIRECTION=both  # For v2 strategies: long, short, or both
+TRADE_DIRECTION=both  # long, short, or both
 ```
 
-### 3. Start the Web Server (Recommended)
+#### 3. Start the Web Server
 
 ```bash
 python3 web_server.py
@@ -45,7 +80,7 @@ python3 web_server.py
 
 Then open your browser: `http://localhost:7777`
 
-### 4. OR Run Strategies Directly
+#### 4. OR Run Strategies Directly
 
 All strategies can be run standalone without the web server:
 
@@ -174,6 +209,9 @@ water-life/
 ├── templates/
 │   └── index.html        # Web UI
 ├── requirements.txt      # Python dependencies
+├── Dockerfile            # Docker image definition
+├── docker-compose.yml    # Docker orchestration
+├── .dockerignore         # Docker build exclusions
 ├── .env                  # API credentials (create this)
 └── README.md            # This file
 ```
@@ -382,7 +420,160 @@ TRADE_DIRECTION=short python3 strategies/scalping2.py
 TRADE_DIRECTION=both python3 strategies/scalping2_claude.py
 ```
 
+## Docker Deployment
+
+### Building and Running
+
+```bash
+# Build the image
+docker-compose build
+
+# Start in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f trading-bot
+
+# Stop the container
+docker-compose down
+
+# Restart
+docker-compose restart
+```
+
+### Docker Commands Cheat Sheet
+
+```bash
+# Build without cache
+docker-compose build --no-cache
+
+# Start with specific strategy
+docker-compose run -e SYMBOL=BANKNIFTY trading-bot
+
+# Access container shell
+docker-compose exec trading-bot bash
+
+# View resource usage
+docker stats scalping-strategy-bot
+
+# Remove everything (including volumes)
+docker-compose down -v
+```
+
+### Environment Variables in Docker
+
+All environment variables can be set in:
+1. **`.env` file** (recommended)
+2. **`docker-compose.yml`** environment section
+3. **Command line**: `docker-compose run -e VAR=value`
+
+Example `.env`:
+```bash
+OPENALGO_API_KEY=your_key
+SYMBOL=NIFTY
+LOTS=2
+TRADE_DIRECTION=both
+TARGET_POINTS=15.0
+STOPLOSS_POINTS=5.0
+```
+
+### Production Deployment
+
+**Using Docker on a Server:**
+
+```bash
+# 1. Copy project to server
+scp -r water-life/ user@server:/path/to/app/
+
+# 2. SSH to server
+ssh user@server
+
+# 3. Navigate to directory
+cd /path/to/app/water-life/
+
+# 4. Create .env with production credentials
+nano .env
+
+# 5. Start in detached mode
+docker-compose up -d
+
+# 6. Enable auto-restart on server reboot
+docker update --restart=always scalping-strategy-bot
+```
+
+**Resource Limits:**
+The docker-compose.yml includes sensible defaults:
+- **CPU Limit**: 1 core max, 0.5 core reserved
+- **Memory Limit**: 1GB max, 512MB reserved
+- **Logs**: Max 10MB per file, 3 files rotation
+
+### Docker Volumes
+
+Mounted volumes for persistence:
+- `./strategies:/app/strategies:ro` - Strategy files (read-only)
+- `./logs:/app/logs` - Log files (persistent)
+- `./.env:/app/.env:ro` - Environment config (read-only)
+
+### Adding Strategies with Docker
+
+```bash
+# 1. Add new strategy file to strategies folder
+cp strategies/TEMPLATE.py strategies/new_strategy.py
+
+# 2. Edit the strategy
+nano strategies/new_strategy.py
+
+# 3. Restart container to pick up new strategy
+docker-compose restart
+
+# Strategy appears automatically in UI!
+```
+
+### Health Checks
+
+The container includes automatic health monitoring:
+- Checks every 30 seconds
+- Verifies web server is responding
+- Auto-restart if unhealthy (with docker-compose restart policy)
+
+```bash
+# Check health status
+docker inspect --format='{{.State.Health.Status}}' scalping-strategy-bot
+```
+
 ## Troubleshooting
+
+### Docker Issues
+
+**Container won't start:**
+```bash
+# Check logs
+docker-compose logs trading-bot
+
+# Verify .env file exists
+cat .env
+
+# Check port 7777 not in use
+lsof -i :7777
+```
+
+**Permission errors:**
+```bash
+# Fix permissions on logs directory
+chmod 755 logs/
+
+# Rebuild without cache
+docker-compose build --no-cache
+```
+
+**Image too large:**
+```bash
+# Clean up unused images
+docker system prune -a
+
+# View image size
+docker images | grep scalping
+```
 
 ### Web server won't start
 - Check if port 7777 is already in use

@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scalping-strategy-bot
+    ports:
+      - "7777:7777"
+    environment:
+      # OpenAlgo API Configuration
+      - OPENALGO_API_KEY=${OPENALGO_API_KEY}
+      - OPENALGO_API_HOST=${OPENALGO_API_HOST:-https://api.openalgo.in}
+      - OPENALGO_WS_URL=${OPENALGO_WS_URL}
+
+      # Trading Configuration
+      - SYMBOL=${SYMBOL:-NIFTY}
+      - EXCHANGE=${EXCHANGE:-NSE_INDEX}
+      - PRODUCT=${PRODUCT:-MIS}
+      - LOTS=${LOTS:-2}
+      - TRADE_DIRECTION=${TRADE_DIRECTION:-both}
+
+      # Strategy Parameters
+      - INTERVAL=${INTERVAL:-5m}
+      - EMA_FAST=${EMA_FAST:-5}
+      - EMA_SLOW=${EMA_SLOW:-20}
+      - ATR_WINDOW=${ATR_WINDOW:-14}
+      - ATR_MIN_POINTS=${ATR_MIN_POINTS:-2.0}
+
+      # Risk Management
+      - TARGET_POINTS=${TARGET_POINTS:-10.0}
+      - STOPLOSS_POINTS=${STOPLOSS_POINTS:-2.0}
+      - DAILY_LOSS_CAP=${DAILY_LOSS_CAP:--1000.0}
+      - ENABLE_EOD_SQUARE_OFF=${ENABLE_EOD_SQUARE_OFF:-true}
+
+      # Other
+      - WARMUP_DAYS=${WARMUP_DAYS:-10}
+      - BROKERAGE_PER_TRADE=${BROKERAGE_PER_TRADE:-20.0}
+      - SLIPPAGE_POINTS=${SLIPPAGE_POINTS:-0.10}
+
+    volumes:
+      # Mount strategies folder for hot-reload (development)
+      - ./strategies:/app/strategies:ro
+      # Mount logs directory (optional)
+      - ./logs:/app/logs
+      # Mount .env file (alternative to environment variables)
+      - ./.env:/app/.env:ro
+
+    restart: unless-stopped
+
+    networks:
+      - trading-network
+
+    # Resource limits (optional but recommended)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  trading-network:
+    driver: bridge
