@@ -51,6 +51,32 @@ except Exception as e:
 IST = pytz.timezone("Asia/Kolkata")
 
 # ----------------------------
+# Strategy Metadata (for auto-discovery)
+# ----------------------------
+STRATEGY_METADATA = {
+    "name": "Scalping v1 (Original)",
+    "description": "Original scalping strategy with hardcoded lot sizes and trade direction control",
+    "version": "1.0",
+    "features": ["EMA Trend Following", "ATR Filter", "OCO Orders", "Trade Direction Control"],
+    "has_trade_direction": True,
+    "author": "OpenAlgo Community"
+}
+
+# Index lot sizes (May 2025)
+INDEX_LOT_SIZES = {
+    # NSE Index
+    "NIFTY": 75,
+    "NIFTYNXT50": 25,
+    "FINNIFTY": 65,
+    "BANKNIFTY": 35,
+    "MIDCPNIFTY": 140,
+    # BSE Index
+    "SENSEX": 20,
+    "BANKEX": 30,
+    "SENSEX50": 60,
+}
+
+# ----------------------------
 # Strategy Configuration
 # ----------------------------
 @dataclass
@@ -85,6 +111,7 @@ class Config:
     target_points: float = float(os.environ.get("TARGET_POINTS", 10.0))
     stoploss_points: float = float(os.environ.get("STOPLOSS_POINTS", 2.0))
     confirm_trend_at_entry: bool = os.environ.get("CONFIRM_TREND_AT_ENTRY", "true").lower() == "true"
+    trade_direction: str = os.environ.get("TRADE_DIRECTION", "both").lower()  # "long", "short", or "both"
 
     # Daily risk cap (₹)
     daily_loss_cap: float = float(os.environ.get("DAILY_LOSS_CAP", -1000.0))
@@ -104,20 +131,6 @@ class Config:
     history_start_date: Optional[str] = os.environ.get("HISTORY_START_DATE")  # YYYY-MM-DD
     history_end_date: Optional[str] = os.environ.get("HISTORY_END_DATE")      # YYYY-MM-DD
 
-
-# Index lot sizes (May 2025)
-INDEX_LOT_SIZES = {
-    # NSE Index
-    "NIFTY": 75,
-    "NIFTYNXT50": 25,
-    "FINNIFTY": 65,
-    "BANKNIFTY": 35,
-    "MIDCPNIFTY": 140,
-    # BSE Index
-    "SENSEX": 20,
-    "BANKEX": 30,
-    "SENSEX50": 60,
-}
 
 # ----------------------------
 # Utilities
@@ -340,6 +353,12 @@ class ScalpWithTrendBot:
             long_sig = (cur["high"] > prev["high"]) and trend_up
             short_sig = (cur["low"] < prev["low"]) and trend_down
 
+            # Filter by trade direction setting
+            if self.cfg.trade_direction == "long":
+                short_sig = False
+            elif self.cfg.trade_direction == "short":
+                long_sig = False
+
             if self.in_position:
                 return
 
@@ -517,6 +536,10 @@ def main():
     cfg = Config()
     if not cfg.api_key:
         print("[FATAL] Please set OPENALGO_API_KEY in environment.")
+        sys.exit(1)
+
+    if cfg.trade_direction not in ["long", "short", "both"]:
+        print(f"[FATAL] TRADE_DIRECTION must be 'long', 'short', or 'both'")
         sys.exit(1)
 
     # Validate symbol format as per OpenAlgo conventions (basic check)

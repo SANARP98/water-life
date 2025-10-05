@@ -18,8 +18,13 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import pytz
 
-# Import the bot
-from scalping import ScalpWithTrendBot, Config, INDEX_LOT_SIZES
+# Import auto-discovery
+from strategies import DISCOVERED_STRATEGIES
+
+# Build strategy registry from discovered strategies
+STRATEGY_REGISTRY = DISCOVERED_STRATEGIES
+
+print(f"[INFO] Loaded {len(STRATEGY_REGISTRY)} strategies: {', '.join(STRATEGY_REGISTRY.keys())}")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'scalping-strategy-secret-key'
@@ -31,15 +36,17 @@ IST = pytz.timezone("Asia/Kolkata")
 # Global state
 class BotManager:
     def __init__(self):
-        self.bot: Optional[ScalpWithTrendBot] = None
+        self.bot = None
         self.bot_thread: Optional[Thread] = None
-        self.config: Optional[Config] = None
+        self.config = None
+        self.selected_strategy: str = "scalping"  # Default strategy
         self.is_running = False
         self.is_paper_trading = True
         self.lock = Lock()
         self.log_queue = Queue()
         self.stats = {
             "status": "stopped",
+            "strategy": "scalping",
             "in_position": False,
             "side": None,
             "entry_price": None,
@@ -56,6 +63,7 @@ class BotManager:
             with self.lock:
                 self.stats.update({
                     "status": "running" if self.is_running else "stopped",
+                    "strategy": self.selected_strategy,
                     "in_position": self.bot.in_position,
                     "side": self.bot.side,
                     "entry_price": self.bot.entry_price,
@@ -99,9 +107,9 @@ def custom_print(*args, **kwargs):
     socketio.emit('log', log_entry, namespace='/')
     original_print(*args, **kwargs)
 
-# Override print in scalping module
-import scalping
-scalping.print = custom_print
+# Override print in all strategy modules
+for strategy_id, strategy_info in STRATEGY_REGISTRY.items():
+    strategy_info['module'].print = custom_print
 
 # ==================== API ROUTES ====================
 
@@ -109,6 +117,23 @@ scalping.print = custom_print
 def index():
     """Serve the main UI"""
     return render_template('index.html')
+
+@app.route('/api/strategies', methods=['GET'])
+def get_strategies():
+    """Get list of available strategies"""
+    strategies = []
+    for key, info in STRATEGY_REGISTRY.items():
+        strategies.append({
+            'id': key,
+            'name': info['name'],
+            'description': info['description'],
+            'features': info['features'],
+            'has_trade_direction': info['has_trade_direction']
+        })
+    return jsonify({
+        'strategies': strategies,
+        'current': bot_manager.selected_strategy
+    })
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
@@ -157,10 +182,16 @@ def get_config():
             'warmup_days': 10,
         }
 
+    # Get lot sizes from current strategy
+    strategy_info = STRATEGY_REGISTRY.get(bot_manager.selected_strategy, STRATEGY_REGISTRY['scalping'])
+    available_symbols = list(strategy_info['lot_sizes'].keys()) if strategy_info['lot_sizes'] else ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50', 'SENSEX', 'BANKEX', 'SENSEX50']
+
     return jsonify({
         'config': config_dict,
         'is_paper_trading': bot_manager.is_paper_trading,
-        'available_symbols': list(INDEX_LOT_SIZES.keys())
+        'selected_strategy': bot_manager.selected_strategy,
+        'has_trade_direction': strategy_info.get('has_trade_direction', False),
+        'available_symbols': available_symbols
     })
 
 @app.route('/api/config', methods=['POST'])
@@ -169,32 +200,47 @@ def update_config():
     data = request.json
 
     try:
+        # Update selected strategy
+        selected_strategy = data.get('selected_strategy', 'scalping')
+        if selected_strategy not in STRATEGY_REGISTRY:
+            return jsonify({'success': False, 'error': f'Invalid strategy: {selected_strategy}'}), 400
+
+        bot_manager.selected_strategy = selected_strategy
+        strategy_info = STRATEGY_REGISTRY[selected_strategy]
+        ConfigClass = strategy_info['config_class']
+
         # Parse square_off_time
         square_off_parts = data.get('square_off_time', '15:25').split(':')
         square_off_time = (int(square_off_parts[0]), int(square_off_parts[1]))
 
-        # Create config
-        config = Config(
-            api_key=data.get('api_key', os.environ.get("OPENALGO_API_KEY", "")),
-            api_host=data.get('api_host', "https://api.openalgo.in"),
-            ws_url=os.environ.get("OPENALGO_WS_URL"),
-            symbol=data.get('symbol', 'NIFTY'),
-            exchange=data.get('exchange', 'NSE_INDEX'),
-            product=data.get('product', 'MIS'),
-            lots=int(data.get('lots', 2)),
-            interval=data.get('interval', '5m'),
-            ema_fast=int(data.get('ema_fast', 5)),
-            ema_slow=int(data.get('ema_slow', 20)),
-            atr_window=int(data.get('atr_window', 14)),
-            atr_min_points=float(data.get('atr_min_points', 2.0)),
-            target_points=float(data.get('target_points', 10.0)),
-            stoploss_points=float(data.get('stoploss_points', 2.0)),
-            confirm_trend_at_entry=bool(data.get('confirm_trend_at_entry', True)),
-            daily_loss_cap=float(data.get('daily_loss_cap', -1000.0)),
-            enable_eod_square_off=bool(data.get('enable_eod_square_off', True)),
-            square_off_time=square_off_time,
-            warmup_days=int(data.get('warmup_days', 10)),
-        )
+        # Build config dict
+        config_params = {
+            'api_key': data.get('api_key', os.environ.get("OPENALGO_API_KEY", "")),
+            'api_host': data.get('api_host', "https://api.openalgo.in"),
+            'ws_url': os.environ.get("OPENALGO_WS_URL"),
+            'symbol': data.get('symbol', 'NIFTY'),
+            'exchange': data.get('exchange', 'NSE_INDEX'),
+            'product': data.get('product', 'MIS'),
+            'lots': int(data.get('lots', 2)),
+            'interval': data.get('interval', '5m'),
+            'ema_fast': int(data.get('ema_fast', 5)),
+            'ema_slow': int(data.get('ema_slow', 20)),
+            'atr_window': int(data.get('atr_window', 14)),
+            'atr_min_points': float(data.get('atr_min_points', 2.0)),
+            'target_points': float(data.get('target_points', 10.0)),
+            'stoploss_points': float(data.get('stoploss_points', 2.0)),
+            'confirm_trend_at_entry': bool(data.get('confirm_trend_at_entry', True)),
+            'daily_loss_cap': float(data.get('daily_loss_cap', -1000.0)),
+            'enable_eod_square_off': bool(data.get('enable_eod_square_off', True)),
+            'square_off_time': square_off_time,
+            'warmup_days': int(data.get('warmup_days', 10)),
+        }
+
+        # Add trade_direction for strategies that support it
+        if strategy_info.get('has_trade_direction'):
+            config_params['trade_direction'] = data.get('trade_direction', 'both')
+
+        config = ConfigClass(**config_params)
 
         bot_manager.config = config
         bot_manager.is_paper_trading = data.get('is_paper_trading', True)
@@ -214,14 +260,18 @@ def start_bot():
             return jsonify({'success': False, 'error': 'Configuration not set'}), 400
 
         try:
+            # Get selected strategy info
+            strategy_info = STRATEGY_REGISTRY[bot_manager.selected_strategy]
+            BotClass = strategy_info['bot_class']
+
             # Create bot instance
             if bot_manager.is_paper_trading:
                 # Wrap bot for paper trading
-                bot_manager.bot = PaperTradingBot(bot_manager.config)
-                custom_print("[PAPER TRADING MODE] Bot will simulate trades without real orders")
+                bot_manager.bot = PaperTradingBot(bot_manager.config, BotClass)
+                custom_print(f"[PAPER TRADING MODE] {strategy_info['name']} - Simulating trades without real orders")
             else:
-                bot_manager.bot = ScalpWithTrendBot(bot_manager.config)
-                custom_print("[LIVE TRADING MODE] Bot will place real orders")
+                bot_manager.bot = BotClass(bot_manager.config)
+                custom_print(f"[LIVE TRADING MODE] {strategy_info['name']} - Placing real orders")
 
             # Start bot in separate thread
             bot_manager.bot_thread = Thread(target=bot_manager.bot.start, daemon=True)
@@ -265,48 +315,66 @@ def get_logs():
 
 # ==================== PAPER TRADING BOT ====================
 
-class PaperTradingBot(ScalpWithTrendBot):
-    """Paper trading wrapper that simulates orders"""
+class PaperTradingBot:
+    """Paper trading wrapper that simulates orders for any strategy"""
 
-    def __init__(self, cfg: Config):
-        super().__init__(cfg)
+    def __init__(self, cfg, BotClass):
+        # Initialize the actual bot
+        self.bot = BotClass(cfg)
+        self.cfg = cfg
         self.paper_orders = {}
         self.paper_order_counter = 1000
 
-    def place_entry(self, side: str):
-        """Simulate entry order"""
-        assert side in ("LONG","SHORT")
-        custom_print(f"[PAPER] {side} ENTRY simulated for {self.qty} {self.cfg.symbol}@{self.cfg.exchange}")
+        # Proxy attributes to the wrapped bot
+        for attr in ['in_position', 'side', 'entry_price', 'tp_level', 'sl_level',
+                     'realized_pnl_today', 'pending_signal', 'qty']:
+            setattr(self, attr, getattr(self.bot, attr, None))
 
-        # Simulate order fill (use last known price or estimate)
-        self.entry_order_id = f"PAPER_{self.paper_order_counter}"
-        self.paper_order_counter += 1
-        self.entry_price = 100.0  # Placeholder - would need real LTP
-        self.entry_time = datetime.now(IST)
-        self.in_position = True
-        self.side = side
+    def __getattr__(self, name):
+        """Proxy any other attribute access to wrapped bot"""
+        return getattr(self.bot, name)
 
-        if side == 'LONG':
-            self.tp_level = self.entry_price + self.cfg.target_points
-            self.sl_level = self.entry_price - self.cfg.stoploss_points
-        else:
-            self.tp_level = self.entry_price - self.cfg.target_points
-            self.sl_level = self.entry_price + self.cfg.stoploss_points
+    def start(self):
+        """Start the wrapped bot"""
+        # Override place_entry and place_exit_legs before starting
+        original_place_entry = self.bot.place_entry
+        original_place_exit_legs = self.bot.place_exit_legs
 
-        custom_print(f"[PAPER] Filled ~{self.entry_price:.2f}. TP={self.tp_level:.2f} SL={self.sl_level:.2f}")
-        self.place_exit_legs()
+        def paper_place_entry(side: str):
+            assert side in ("LONG","SHORT")
+            custom_print(f"[PAPER] {side} ENTRY simulated for {self.bot.qty} {self.bot.cfg.symbol}@{self.bot.cfg.exchange}")
 
-    def place_exit_legs(self):
-        """Simulate exit orders"""
-        if not self.in_position or self.entry_price is None:
-            return
+            self.bot.entry_order_id = f"PAPER_{self.paper_order_counter}"
+            self.paper_order_counter += 1
+            self.bot.entry_price = 100.0  # Placeholder
+            self.bot.in_position = True
+            self.bot.side = side
 
-        self.tp_order_id = f"PAPER_{self.paper_order_counter}"
-        self.paper_order_counter += 1
-        self.sl_order_id = f"PAPER_{self.paper_order_counter}"
-        self.paper_order_counter += 1
+            if side == 'LONG':
+                self.bot.tp_level = self.bot.entry_price + self.bot.cfg.target_points
+                self.bot.sl_level = self.bot.entry_price - self.bot.cfg.stoploss_points
+            else:
+                self.bot.tp_level = self.bot.entry_price - self.bot.cfg.target_points
+                self.bot.sl_level = self.bot.entry_price + self.bot.cfg.stoploss_points
 
-        custom_print(f"[PAPER] Exit orders simulated: TP @ {self.tp_level:.2f}, SL @ {self.sl_level:.2f}")
+            custom_print(f"[PAPER] Filled ~{self.bot.entry_price:.2f}. TP={self.bot.tp_level:.2f} SL={self.bot.sl_level:.2f}")
+            self.bot.place_exit_legs()
+
+        def paper_place_exit_legs():
+            if not self.bot.in_position or self.bot.entry_price is None:
+                return
+            self.bot.tp_order_id = f"PAPER_{self.paper_order_counter}"
+            self.paper_order_counter += 1
+            self.bot.sl_order_id = f"PAPER_{self.paper_order_counter}"
+            self.paper_order_counter += 1
+            custom_print(f"[PAPER] Exit orders simulated: TP @ {self.bot.tp_level:.2f}, SL @ {self.bot.sl_level:.2f}")
+
+        # Monkey patch the methods
+        self.bot.place_entry = paper_place_entry
+        self.bot.place_exit_legs = paper_place_exit_legs
+
+        # Start the wrapped bot
+        self.bot.start()
 
 # ==================== WebSocket Events ====================
 

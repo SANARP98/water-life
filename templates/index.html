@@ -374,13 +374,28 @@
     <div class="container">
         <header>
             <h1>🎯 Scalping Strategy Manager</h1>
-            <div class="status-badge" id="statusBadge">● STOPPED</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <div class="status-badge" style="background: #667eea; color: white;" id="strategyBadge">scalping v1</div>
+                <div class="status-badge" id="statusBadge">● STOPPED</div>
+            </div>
         </header>
 
         <div class="main-grid">
             <!-- Configuration Panel -->
             <div class="card">
                 <h2>⚙️ Configuration</h2>
+
+                <div class="form-group">
+                    <label>Strategy Selection</label>
+                    <select id="strategySelect" onchange="onStrategyChange()">
+                        <option value="scalping">Scalping v1 (Original)</option>
+                        <option value="scalping2">Scalping v2 (Enhanced)</option>
+                        <option value="scalping2_claude">Scalping v2 Claude (Corrected)</option>
+                    </select>
+                    <small id="strategyDescription" style="display: block; margin-top: 5px; color: #666; font-size: 12px;">
+                        Original scalping strategy with hardcoded lot sizes
+                    </small>
+                </div>
 
                 <div class="trading-mode">
                     <span class="mode-label">Trading Mode:</span>
@@ -507,6 +522,15 @@
                     <input type="text" id="squareOffTime" value="15:25" placeholder="HH:MM">
                 </div>
 
+                <div class="form-group" id="tradeDirectionGroup" style="display: none;">
+                    <label>Trade Direction</label>
+                    <select id="tradeDirection">
+                        <option value="both">Both (Long & Short)</option>
+                        <option value="long">Long Only</option>
+                        <option value="short">Short Only</option>
+                    </select>
+                </div>
+
                 <div style="margin-top: 25px;">
                     <button class="btn btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
                 </div>
@@ -584,10 +608,14 @@
         const socket = io();
 
         let isRunning = false;
+        let availableStrategies = [];
+        let currentStrategy = 'scalping';
+        let hasTradeDirection = false;
 
         // Socket event handlers
         socket.on('connect', function() {
             console.log('Connected to server');
+            loadStrategies();
             loadConfig();
         });
 
@@ -598,6 +626,50 @@
         socket.on('status_update', function(data) {
             updateStatus(data);
         });
+
+        // Load available strategies
+        async function loadStrategies() {
+            try {
+                const response = await fetch('/api/strategies');
+                const data = await response.json();
+                availableStrategies = data.strategies;
+                currentStrategy = data.current;
+
+                // Populate strategy dropdown
+                const select = document.getElementById('strategySelect');
+                select.innerHTML = '';
+                data.strategies.forEach(strategy => {
+                    const option = document.createElement('option');
+                    option.value = strategy.id;
+                    option.textContent = strategy.name;
+                    option.selected = strategy.id === currentStrategy;
+                    select.appendChild(option);
+                });
+
+                onStrategyChange();
+            } catch (error) {
+                console.error('Error loading strategies:', error);
+            }
+        }
+
+        // Handle strategy change
+        function onStrategyChange() {
+            const selectedId = document.getElementById('strategySelect').value;
+            const strategy = availableStrategies.find(s => s.id === selectedId);
+
+            if (strategy) {
+                // Update description
+                document.getElementById('strategyDescription').textContent = strategy.description;
+
+                // Show/hide trade direction based on strategy
+                hasTradeDirection = strategy.has_trade_direction;
+                const tradeDirectionGroup = document.getElementById('tradeDirectionGroup');
+                tradeDirectionGroup.style.display = hasTradeDirection ? 'block' : 'none';
+
+                // Update strategy badge
+                document.getElementById('strategyBadge').textContent = strategy.name;
+            }
+        }
 
         // Load configuration
         async function loadConfig() {
@@ -623,6 +695,19 @@
                 document.getElementById('squareOffTime').value = data.config.square_off_time;
 
                 document.getElementById('paperTradingToggle').checked = !data.is_paper_trading;
+
+                // Set strategy selection
+                if (data.selected_strategy) {
+                    document.getElementById('strategySelect').value = data.selected_strategy;
+                    currentStrategy = data.selected_strategy;
+                    onStrategyChange();
+                }
+
+                // Set trade direction if available
+                if (data.config.trade_direction) {
+                    document.getElementById('tradeDirection').value = data.config.trade_direction;
+                }
+
                 updateModeLabel();
             } catch (error) {
                 console.error('Error loading config:', error);
@@ -632,6 +717,7 @@
         // Save configuration
         async function saveConfig() {
             const config = {
+                selected_strategy: document.getElementById('strategySelect').value,
                 api_key: document.getElementById('apiKey').value,
                 api_host: document.getElementById('apiHost').value,
                 symbol: document.getElementById('symbol').value,
@@ -650,6 +736,11 @@
                 square_off_time: document.getElementById('squareOffTime').value,
                 is_paper_trading: !document.getElementById('paperTradingToggle').checked
             };
+
+            // Add trade_direction if supported by current strategy
+            if (hasTradeDirection) {
+                config.trade_direction = document.getElementById('tradeDirection').value;
+            }
 
             try {
                 const response = await fetch('/api/config', {
@@ -706,6 +797,7 @@
         // Update status display
         function updateStatus(data) {
             const statusBadge = document.getElementById('statusBadge');
+            const strategyBadge = document.getElementById('strategyBadge');
             const positionStatus = document.getElementById('positionStatus');
             const positionSide = document.getElementById('positionSide');
             const entryPrice = document.getElementById('entryPrice');
@@ -714,6 +806,14 @@
             const dailyPnl = document.getElementById('dailyPnl');
             const pendingSignal = document.getElementById('pendingSignal');
             const lastUpdate = document.getElementById('lastUpdate');
+
+            // Update strategy badge
+            if (data.strategy) {
+                const strategy = availableStrategies.find(s => s.id === data.strategy);
+                if (strategy) {
+                    strategyBadge.textContent = strategy.name;
+                }
+            }
 
             // Update status badge
             if (data.status === 'running') {

@@ -10,6 +10,8 @@ A professional web-based interface for managing and monitoring your OpenAlgo sca
 🔄 **Paper Trading Mode** - Test your strategy without risking real capital
 ⚙️ **Full Configuration** - All strategy parameters adjustable through the UI
 🚀 **Start/Stop Control** - Easy bot lifecycle management with one click
+🔀 **Multi-Strategy Support** - Choose from multiple strategy implementations
+📍 **Trade Direction Control** - Select long-only, short-only, or both (v2 strategies)
 
 ## Quick Start
 
@@ -27,45 +29,76 @@ Create a `.env` file with your OpenAlgo credentials:
 OPENALGO_API_KEY=your_api_key_here
 OPENALGO_API_HOST=https://api.openalgo.in
 OPENALGO_WS_URL=wss://api.openalgo.in/ws  # Optional
+
+# Optional: Set defaults for direct strategy execution
+SYMBOL=NIFTY
+EXCHANGE=NSE_INDEX
+LOTS=2
+TRADE_DIRECTION=both  # For v2 strategies: long, short, or both
 ```
 
-### 3. Start the Web Server
+### 3. Start the Web Server (Recommended)
 
 ```bash
-python web_server.py
+python3 web_server.py
 ```
 
-### 4. Access the UI
+Then open your browser: `http://localhost:7777`
 
-Open your browser and navigate to:
+### 4. OR Run Strategies Directly
+
+All strategies can be run standalone without the web server:
+
+```bash
+# Run original scalping strategy
+python3 strategies/scalping.py
+
+# Run enhanced v2 strategy
+python3 strategies/scalping2.py
+
+# Run Claude-corrected version
+python3 strategies/scalping2_claude.py
 ```
-http://localhost:7777
-```
+
+Each strategy reads configuration from environment variables or `.env` file.
 
 ## Usage Guide
 
 ### Configuration Panel
 
-1. **Trading Mode Toggle**
+1. **Strategy Selection**
+   - **Scalping v1 (Original)**: Hardcoded lot sizes, proven logic, trade direction control
+   - **Scalping v2 (Enhanced)**: API-based lot sizes, trade direction control
+   - **Scalping v2 Claude (Corrected)**: Enhanced error handling and fixes
+   - Each strategy shows description and available features
+   - **All strategies support trade direction control** (long-only, short-only, or both)
+
+2. **Trading Mode Toggle**
    - 📝 **Paper Trading** (Green): Simulates trades without real orders
    - 🔴 **Live Trading** (Red): Places real orders on your broker
 
-2. **API Settings**
+3. **API Settings**
    - Enter your OpenAlgo API key and host URL
    - These can also be set via environment variables
 
-3. **Symbol & Exchange**
+4. **Symbol & Exchange**
    - Choose from: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, etc.
    - Select exchange: NSE_INDEX or BSE_INDEX
    - Product type: MIS (Intraday), CNC, or NRML
 
-4. **Indicator Settings**
+5. **Trade Direction** (All strategies)
+   - **Both**: Take both long and short trades (default)
+   - **Long Only**: Only take long positions
+   - **Short Only**: Only take short positions
+   - Available in all strategy versions
+
+6. **Indicator Settings**
    - **EMA Fast**: Fast EMA period (default: 5)
    - **EMA Slow**: Slow EMA period (default: 20)
    - **ATR Window**: ATR calculation period (default: 14)
    - **ATR Min Points**: Minimum ATR to trade (filters low volatility)
 
-5. **Risk Management**
+7. **Risk Management**
    - **Target Points**: Take profit level in points
    - **Stoploss Points**: Stop loss level in points
    - **Daily Loss Cap**: Maximum daily loss before stopping new trades
@@ -73,7 +106,7 @@ http://localhost:7777
    - **EOD Square-off**: Auto-exit positions at end of day
    - **Square-off Time**: Time to square-off positions (e.g., 15:25)
 
-6. **Save Configuration**
+8. **Save Configuration**
    - Click "💾 Save Configuration" to apply settings
    - Settings are validated before saving
 
@@ -130,7 +163,13 @@ The bot implements a **Scalp-with-Trend** strategy:
 
 ```
 water-life/
-├── scalping.py           # Core trading bot logic
+├── strategies/           # Trading strategies package (auto-discovery enabled!)
+│   ├── __init__.py      # Auto-discovery logic
+│   ├── TEMPLATE.py      # Template for new strategies
+│   ├── scalping.py      # Original scalping strategy
+│   ├── scalping2.py     # Enhanced scalping strategy
+│   └── scalping2_claude.py  # Claude-enhanced version
+│   └── [your_strategy.py]   # Add your own - appears automatically!
 ├── web_server.py         # Flask web server and API
 ├── templates/
 │   └── index.html        # Web UI
@@ -139,16 +178,112 @@ water-life/
 └── README.md            # This file
 ```
 
+## Available Strategies
+
+All strategies are **automatically discovered** from the `strategies/` folder!
+
+### Built-in Strategies
+
+#### Scalping v1 (Original)
+- **File**: `strategies/scalping.py`
+- **Lot Sizes**: Hardcoded INDEX_LOT_SIZES dictionary
+- **Features**: EMA trend following, ATR filter, OCO orders, Trade Direction Control
+- **Best for**: Stable, proven implementation with hardcoded lot sizes
+
+#### Scalping v2 (Enhanced)
+- **File**: `strategies/scalping2.py`
+- **Lot Sizes**: Dynamic from OpenAlgo API
+- **Features**: All v1 features + Trade Direction Control
+- **Best for**: Flexibility and one-directional trading
+- **New**: `TRADE_DIRECTION` env variable (long/short/both)
+
+#### Scalping v2 Claude (Corrected)
+- **File**: `strategies/scalping2_claude.py`
+- **Lot Sizes**: Dynamic from OpenAlgo API
+- **Features**: All v2 features + Enhanced error handling
+- **Best for**: Production use with robust error handling
+
+### Adding Your Own Strategy
+
+**Zero-config strategy addition!** Just drop a `.py` file in `strategies/` folder and it appears in the UI automatically.
+
+#### Quick Start:
+```bash
+# 1. Copy the template
+cp strategies/TEMPLATE.py strategies/my_strategy.py
+
+# 2. Edit the metadata and implement your logic
+# (See template for required structure)
+
+# 3. Restart web server
+python3 web_server.py
+# Your strategy now appears in the dropdown!
+```
+
+#### Required Structure:
+Every strategy file must have:
+
+1. **STRATEGY_METADATA dictionary:**
+```python
+STRATEGY_METADATA = {
+    "name": "My Strategy Name",
+    "description": "What it does",
+    "version": "1.0",
+    "features": ["Feature 1", "Feature 2"],
+    "has_trade_direction": True,
+    "author": "Your Name"
+}
+```
+
+2. **Config dataclass:**
+```python
+@dataclass
+class Config:
+    api_key: str = os.getenv("OPENALGO_API_KEY", "")
+    # ... other config parameters
+```
+
+3. **ScalpWithTrendBot class:**
+```python
+class ScalpWithTrendBot:
+    def __init__(self, cfg: Config):
+        # Initialize
+
+    def start(self):
+        # Your strategy logic
+```
+
+4. **main() function:**
+```python
+def main():
+    cfg = Config()
+    bot = ScalpWithTrendBot(cfg)
+    bot.start()
+
+if __name__ == "__main__":
+    main()
+```
+
+#### Auto-Discovery Features:
+✅ **Zero configuration** - No need to edit web_server.py
+✅ **Hot-swappable** - Add/remove strategies without code changes
+✅ **Self-documenting** - Metadata in the strategy file itself
+✅ **Error tolerant** - Invalid strategies are skipped with warnings
+✅ **Direct execution** - All strategies work standalone too
+
 ## API Endpoints
+
+### GET `/api/strategies`
+Returns list of available strategies with metadata
 
 ### GET `/api/config`
 Returns current configuration and available symbols
 
 ### POST `/api/config`
-Updates configuration with provided settings
+Updates configuration with provided settings (includes `selected_strategy`)
 
 ### POST `/api/start`
-Starts the trading bot
+Starts the selected trading bot
 
 ### POST `/api/stop`
 Stops the trading bot
@@ -194,6 +329,59 @@ Returns recent log entries
    - Check logs regularly for errors or warnings
    - Review P&L and position status frequently
 
+## Running Strategies Directly
+
+Each strategy can be executed standalone without the web interface:
+
+```bash
+# Method 1: Using environment variables
+export OPENALGO_API_KEY=your_key
+export SYMBOL=NIFTY
+export LOTS=2
+export TRADE_DIRECTION=both  # v2 strategies only
+python3 strategies/scalping2.py
+
+# Method 2: Using .env file (recommended)
+# Create .env with your settings, then:
+python3 strategies/scalping2.py
+```
+
+### Environment Variables for Direct Execution
+
+All strategies support these variables:
+```bash
+OPENALGO_API_KEY=your_api_key
+OPENALGO_API_HOST=https://api.openalgo.in
+SYMBOL=NIFTY
+EXCHANGE=NSE_INDEX
+PRODUCT=MIS
+LOTS=2
+EMA_FAST=5
+EMA_SLOW=20
+ATR_WINDOW=14
+ATR_MIN_POINTS=2.0
+TARGET_POINTS=10.0
+STOPLOSS_POINTS=2.0
+DAILY_LOSS_CAP=-1000.0
+```
+
+Additional for all strategies:
+```bash
+TRADE_DIRECTION=both  # Options: long, short, both (default: both)
+```
+
+**Trade Direction Examples:**
+```bash
+# Only long trades
+TRADE_DIRECTION=long python3 strategies/scalping.py
+
+# Only short trades
+TRADE_DIRECTION=short python3 strategies/scalping2.py
+
+# Both directions (default)
+TRADE_DIRECTION=both python3 strategies/scalping2_claude.py
+```
+
 ## Troubleshooting
 
 ### Web server won't start
@@ -205,11 +393,20 @@ Returns recent log entries
 - Check OpenAlgo API host is reachable
 - Review logs for specific error messages
 
+### Strategy not appearing in dropdown
+- **Check strategy has required components**: `STRATEGY_METADATA`, `Config`, `ScalpWithTrendBot`
+- **Check console logs** when starting web server - shows discovered strategies
+- **Verify filename**: Must be `.py` file, not named `__init__.py` or `TEMPLATE.py`
+- **Check for errors**: Invalid strategies are skipped with warning messages
+- **Restart web server** after adding new strategy file
+
 ### No trades being executed
 - Verify market is open and in configured session windows
 - Check if ATR filter is too restrictive
 - Ensure symbol has sufficient volatility
 - Review signal generation logic in logs
+- **Check TRADE_DIRECTION setting**: If set to "long" but market is trending down, no trades will be taken (and vice versa)
+- Consider using "both" for TRADE_DIRECTION to allow trades in either direction
 
 ### Paper trading not working
 - Verify toggle is in Paper Trading position (green)
@@ -220,7 +417,7 @@ Returns recent log entries
 
 - **OpenAlgo Docs**: https://docs.openalgo.in
 - **OpenAlgo Discord**: https://openalgo.in/discord
-- **Strategy File**: Review `scalping.py` for detailed logic
+- **Strategy Files**: Review files in `strategies/` folder for detailed logic
 - **Web Server**: Review `web_server.py` for API details
 
 ## License
