@@ -43,7 +43,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 # === OpenAlgo SDK imports ===
 try:
-    import openalgo
+    from openalgo import OpenAlgo  # REST + WS client (assumed)
+    # from openalgo.ta import ema, atr  # indicator functions
 except Exception as e:
     print("[FATAL] openalgo library is required. Please install and configure your API keys.")
     raise
@@ -154,9 +155,9 @@ def resolve_quantity(cfg: Config) -> int:
 def compute_indicators(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     # Assumes df columns: ['timestamp','open','high','low','close','volume']
     out = df.copy()
-    out["ema_fast"] = openalgo.ta.ema(out["close"].values, cfg.ema_fast)
-    out["ema_slow"] = openalgo.ta.ema(out["close"].values, cfg.ema_slow)
-    out["atr"] = openalgo.ta.atr(out[["high", "low", "close"]].values, cfg.atr_window)
+    out["ema_fast"] = ema(out["close"].values, cfg.ema_fast)
+    out["ema_slow"] = ema(out["close"].values, cfg.ema_slow)
+    out["atr"] = atr(out[["high", "low", "close"]].values, cfg.atr_window)
     return out
 
 
@@ -165,7 +166,7 @@ def last_complete_bar(df: pd.DataFrame) -> int:
     return len(df) - 1
 
 
-def get_history(client, cfg: Config) -> pd.DataFrame:
+def get_history(client: OpenAlgo, cfg: Config) -> pd.DataFrame:
     """Fetch recent history (uses explicit start_date/end_date controls as required)."""
     today = now_ist().date()
     if cfg.history_start_date:
@@ -207,7 +208,7 @@ def get_history(client, cfg: Config) -> pd.DataFrame:
 class ScalpWithTrendBot:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.client = openalgo.api(api_key=cfg.api_key, host=cfg.api_host)
+        self.client = OpenAlgo(api_key=cfg.api_key, host=cfg.api_host, ws_url=cfg.ws_url)
         self.scheduler = BackgroundScheduler(timezone=IST)
 
         # Derived
