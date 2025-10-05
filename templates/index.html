@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scalping Strategy Manager</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .status-badge {
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .status-stopped {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .status-running {
+            background: #51cf66;
+            color: white;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #51cf66;
+            transition: .4s;
+            border-radius: 30px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #ff6b6b;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(30px);
+        }
+
+        .trading-mode {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mode-label {
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .mode-paper {
+            color: #51cf66;
+        }
+
+        .mode-live {
+            color: #ff6b6b;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #51cf66;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #40c057;
+        }
+
+        .btn-danger {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #ff5252;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .position-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        .position-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .position-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .position-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .position-value {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .pnl-positive {
+            color: #51cf66;
+        }
+
+        .pnl-negative {
+            color: #ff6b6b;
+        }
+
+        .logs-container {
+            grid-column: 1 / -1;
+            max-height: 400px;
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .logs-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 10px;
+            height: 350px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .log-timestamp {
+            color: #858585;
+            margin-right: 10px;
+        }
+
+        .log-info {
+            color: #4ec9b0;
+        }
+
+        .log-warning {
+            color: #dcdcaa;
+        }
+
+        .log-error {
+            color: #f48771;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        @media (max-width: 968px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .position-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Scalping Strategy Manager</h1>
+            <div class="status-badge" id="statusBadge">● STOPPED</div>
+        </header>
+
+        <div class="main-grid">
+            <!-- Configuration Panel -->
+            <div class="card">
+                <h2>⚙️ Configuration</h2>
+
+                <div class="trading-mode">
+                    <span class="mode-label">Trading Mode:</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="paperTradingToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="mode-label" id="modeLabel">
+                        <span class="mode-paper">📝 PAPER TRADING</span>
+                    </span>
+                </div>
+
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="text" id="apiKey" placeholder="Your OpenAlgo API Key">
+                </div>
+
+                <div class="form-group">
+                    <label>API Host</label>
+                    <input type="text" id="apiHost" placeholder="https://api.openalgo.in">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Symbol</label>
+                        <select id="symbol">
+                            <option value="NIFTY">NIFTY</option>
+                            <option value="BANKNIFTY">BANKNIFTY</option>
+                            <option value="FINNIFTY">FINNIFTY</option>
+                            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                            <option value="NIFTYNXT50">NIFTYNXT50</option>
+                            <option value="SENSEX">SENSEX</option>
+                            <option value="BANKEX">BANKEX</option>
+                            <option value="SENSEX50">SENSEX50</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Exchange</label>
+                        <select id="exchange">
+                            <option value="NSE_INDEX">NSE_INDEX</option>
+                            <option value="BSE_INDEX">BSE_INDEX</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Product</label>
+                        <select id="product">
+                            <option value="MIS">MIS (Intraday)</option>
+                            <option value="CNC">CNC</option>
+                            <option value="NRML">NRML</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Lots</label>
+                        <input type="number" id="lots" value="2" min="1">
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #667eea;">Indicators</h3>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>EMA Fast</label>
+                        <input type="number" id="emaFast" value="5" min="1">
+                    </div>
+
+                    <div class="form-group">
+                        <label>EMA Slow</label>
+                        <input type="number" id="emaSlow" value="20" min="1">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ATR Window</label>
+                        <input type="number" id="atrWindow" value="14" min="1">
+                    </div>
+
+                    <div class="form-group">
+                        <label>ATR Min Points</label>
+                        <input type="number" id="atrMinPoints" value="2.0" step="0.1">
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #667eea;">Risk Management</h3>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Target Points</label>
+                        <input type="number" id="targetPoints" value="10.0" step="0.5">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Stoploss Points</label>
+                        <input type="number" id="stoplossPoints" value="2.0" step="0.5">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Daily Loss Cap (₹)</label>
+                    <input type="number" id="dailyLossCap" value="-1000" step="100">
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="confirmTrend" checked>
+                        <label style="margin-bottom: 0;">Confirm Trend at Entry</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="eodSquareOff" checked>
+                        <label style="margin-bottom: 0;">Enable EOD Square-off</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Square-off Time</label>
+                    <input type="text" id="squareOffTime" value="15:25" placeholder="HH:MM">
+                </div>
+
+                <div style="margin-top: 25px;">
+                    <button class="btn btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
+                </div>
+            </div>
+
+            <!-- Monitoring Panel -->
+            <div class="card">
+                <h2>📊 Monitoring</h2>
+
+                <div class="position-card">
+                    <h3 style="margin-bottom: 10px; font-size: 18px;">Current Position</h3>
+                    <div class="position-grid">
+                        <div class="position-item">
+                            <div class="position-label">Status</div>
+                            <div class="position-value" id="positionStatus">FLAT</div>
+                        </div>
+                        <div class="position-item">
+                            <div class="position-label">Side</div>
+                            <div class="position-value" id="positionSide">-</div>
+                        </div>
+                        <div class="position-item">
+                            <div class="position-label">Entry</div>
+                            <div class="position-value" id="entryPrice">-</div>
+                        </div>
+                        <div class="position-item">
+                            <div class="position-label">Target</div>
+                            <div class="position-value" id="tpLevel">-</div>
+                        </div>
+                        <div class="position-item">
+                            <div class="position-label">Stoploss</div>
+                            <div class="position-value" id="slLevel">-</div>
+                        </div>
+                        <div class="position-item">
+                            <div class="position-label">Daily P&L</div>
+                            <div class="position-value" id="dailyPnl">₹0.00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">Pending Signal</div>
+                        <div class="stat-value" id="pendingSignal">-</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Last Update</div>
+                        <div class="stat-value" id="lastUpdate">-</div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 25px;">
+                    <button class="btn btn-success" id="startBtn" onclick="startBot()">▶️ Start Bot</button>
+                    <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>⏹️ Stop Bot</button>
+                </div>
+            </div>
+
+            <!-- Logs Panel -->
+            <div class="card logs-container">
+                <div class="logs-header">
+                    <h2>📝 Activity Logs</h2>
+                    <button class="btn btn-primary" onclick="clearLogs()">Clear Logs</button>
+                </div>
+                <div class="logs-box" id="logsBox">
+                    <div class="log-entry">
+                        <span class="log-timestamp">[System]</span>
+                        <span class="log-info">Waiting to start...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket connection
+        const socket = io();
+
+        let isRunning = false;
+
+        // Socket event handlers
+        socket.on('connect', function() {
+            console.log('Connected to server');
+            loadConfig();
+        });
+
+        socket.on('log', function(data) {
+            addLog(data);
+        });
+
+        socket.on('status_update', function(data) {
+            updateStatus(data);
+        });
+
+        // Load configuration
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+
+                document.getElementById('apiKey').value = data.config.api_key || '';
+                document.getElementById('apiHost').value = data.config.api_host;
+                document.getElementById('symbol').value = data.config.symbol;
+                document.getElementById('exchange').value = data.config.exchange;
+                document.getElementById('product').value = data.config.product;
+                document.getElementById('lots').value = data.config.lots;
+                document.getElementById('emaFast').value = data.config.ema_fast;
+                document.getElementById('emaSlow').value = data.config.ema_slow;
+                document.getElementById('atrWindow').value = data.config.atr_window;
+                document.getElementById('atrMinPoints').value = data.config.atr_min_points;
+                document.getElementById('targetPoints').value = data.config.target_points;
+                document.getElementById('stoplossPoints').value = data.config.stoploss_points;
+                document.getElementById('dailyLossCap').value = data.config.daily_loss_cap;
+                document.getElementById('confirmTrend').checked = data.config.confirm_trend_at_entry;
+                document.getElementById('eodSquareOff').checked = data.config.enable_eod_square_off;
+                document.getElementById('squareOffTime').value = data.config.square_off_time;
+
+                document.getElementById('paperTradingToggle').checked = !data.is_paper_trading;
+                updateModeLabel();
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Save configuration
+        async function saveConfig() {
+            const config = {
+                api_key: document.getElementById('apiKey').value,
+                api_host: document.getElementById('apiHost').value,
+                symbol: document.getElementById('symbol').value,
+                exchange: document.getElementById('exchange').value,
+                product: document.getElementById('product').value,
+                lots: parseInt(document.getElementById('lots').value),
+                ema_fast: parseInt(document.getElementById('emaFast').value),
+                ema_slow: parseInt(document.getElementById('emaSlow').value),
+                atr_window: parseInt(document.getElementById('atrWindow').value),
+                atr_min_points: parseFloat(document.getElementById('atrMinPoints').value),
+                target_points: parseFloat(document.getElementById('targetPoints').value),
+                stoploss_points: parseFloat(document.getElementById('stoplossPoints').value),
+                daily_loss_cap: parseFloat(document.getElementById('dailyLossCap').value),
+                confirm_trend_at_entry: document.getElementById('confirmTrend').checked,
+                enable_eod_square_off: document.getElementById('eodSquareOff').checked,
+                square_off_time: document.getElementById('squareOffTime').value,
+                is_paper_trading: !document.getElementById('paperTradingToggle').checked
+            };
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Configuration saved successfully!');
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error saving configuration: ' + error);
+            }
+        }
+
+        // Start bot
+        async function startBot() {
+            try {
+                const response = await fetch('/api/start', {method: 'POST'});
+                const data = await response.json();
+
+                if (data.success) {
+                    isRunning = true;
+                    updateButtons();
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error starting bot: ' + error);
+            }
+        }
+
+        // Stop bot
+        async function stopBot() {
+            try {
+                const response = await fetch('/api/stop', {method: 'POST'});
+                const data = await response.json();
+
+                if (data.success) {
+                    isRunning = false;
+                    updateButtons();
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error stopping bot: ' + error);
+            }
+        }
+
+        // Update status display
+        function updateStatus(data) {
+            const statusBadge = document.getElementById('statusBadge');
+            const positionStatus = document.getElementById('positionStatus');
+            const positionSide = document.getElementById('positionSide');
+            const entryPrice = document.getElementById('entryPrice');
+            const tpLevel = document.getElementById('tpLevel');
+            const slLevel = document.getElementById('slLevel');
+            const dailyPnl = document.getElementById('dailyPnl');
+            const pendingSignal = document.getElementById('pendingSignal');
+            const lastUpdate = document.getElementById('lastUpdate');
+
+            // Update status badge
+            if (data.status === 'running') {
+                statusBadge.textContent = '● RUNNING';
+                statusBadge.className = 'status-badge status-running';
+                isRunning = true;
+            } else {
+                statusBadge.textContent = '● STOPPED';
+                statusBadge.className = 'status-badge status-stopped';
+                isRunning = false;
+            }
+
+            // Update position
+            positionStatus.textContent = data.in_position ? 'IN POSITION' : 'FLAT';
+            positionSide.textContent = data.side || '-';
+            entryPrice.textContent = data.entry_price ? data.entry_price.toFixed(2) : '-';
+            tpLevel.textContent = data.tp_level ? data.tp_level.toFixed(2) : '-';
+            slLevel.textContent = data.sl_level ? data.sl_level.toFixed(2) : '-';
+
+            // Update P&L
+            const pnl = data.realized_pnl_today || 0;
+            dailyPnl.textContent = '₹' + pnl.toFixed(2);
+            dailyPnl.className = 'position-value ' + (pnl >= 0 ? 'pnl-positive' : 'pnl-negative');
+
+            pendingSignal.textContent = data.pending_signal || '-';
+            lastUpdate.textContent = data.last_update || '-';
+
+            updateButtons();
+        }
+
+        // Update button states
+        function updateButtons() {
+            document.getElementById('startBtn').disabled = isRunning;
+            document.getElementById('stopBtn').disabled = !isRunning;
+        }
+
+        // Add log entry
+        function addLog(data) {
+            const logsBox = document.getElementById('logsBox');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+
+            const levelClass = 'log-' + (data.level || 'info').toLowerCase();
+
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${data.timestamp}]</span>
+                <span class="${levelClass}">${data.message}</span>
+            `;
+
+            logsBox.appendChild(logEntry);
+            logsBox.scrollTop = logsBox.scrollHeight;
+
+            // Keep only last 500 logs
+            while (logsBox.children.length > 500) {
+                logsBox.removeChild(logsBox.firstChild);
+            }
+        }
+
+        // Clear logs
+        function clearLogs() {
+            document.getElementById('logsBox').innerHTML = '';
+        }
+
+        // Update mode label
+        function updateModeLabel() {
+            const toggle = document.getElementById('paperTradingToggle');
+            const label = document.getElementById('modeLabel');
+
+            if (toggle.checked) {
+                label.innerHTML = '<span class="mode-live">🔴 LIVE TRADING</span>';
+            } else {
+                label.innerHTML = '<span class="mode-paper">📝 PAPER TRADING</span>';
+            }
+        }
+
+        document.getElementById('paperTradingToggle').addEventListener('change', updateModeLabel);
+
+        // Auto-scroll logs
+        setInterval(() => {
+            const logsBox = document.getElementById('logsBox');
+            logsBox.scrollTop = logsBox.scrollHeight;
+        }, 1000);
+    </script>
+</body>
+</html>

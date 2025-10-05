@@ -1,5 +1,6 @@
-# Requirements for scalping.py
+# Requirements for scalping.py and web_server.py
 # Generated from imports in scalping.py (OpenAlgo SDK, APScheduler, pandas, numpy, pytz)
+# Web server dependencies (Flask, Flask-CORS, Flask-SocketIO)
 
 openalgo>=1.0.32
 APScheduler>=3.10.1
@@ -7,3 +8,10 @@ pandas>=2.3.3
 numpy>=2.3.3
 pytz>=2025.2
 python-dotenv
+
+# Web server dependencies
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+Flask-SocketIO>=5.3.0
+python-socketio>=5.11.0
+eventlet>=0.35.0
