@@ -1,0 +1,8 @@
+# Requirements for scalping.py
+# Generated from imports in scalping.py (OpenAlgo SDK, APScheduler, pandas, numpy, pytz)
+
+openalgo>=1.0.32
+APScheduler>=3.10.1
+pandas>=2.3.3
+numpy>=2.3.3
+pytz>=2025.2
