@@ -105,3 +105,11 @@ site/
 .env
 .env.*
 secrets.env
+
+# Trading bot files
+scalp_with_trend.log
+state.json
+
+# History cache (CSV files)
+history_cache/
+*.csv

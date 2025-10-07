@@ -1,0 +1,226 @@
+2025-10-07 13:51:59,233 [scalp_with_trend_PE] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 13:51:59,233 [scalp_with_trend_PE] [VALIDATION] Detected option symbol format
+2025-10-07 13:51:59,590 [scalp_with_trend_PE] [VALIDATION] ✅ Symbol validated via quotes API
+2025-10-07 13:51:59,836 [scalp_with_trend_PE] Resolved lot size for NIFTY28OCT2525200PE via API: 75
+2025-10-07 13:51:59,836 
+[scalp_with_trend_PE] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 3.0,
+  "stoploss_points": 3.0,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 3,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true
+}
+2025-10-07 13:51:59,837 [scalp_with_trend_PE] [WARN] Failed to load state: Expecting value: line 1 column 1 (char 0)
+2025-10-07 13:51:59,837 [scalp_with_trend_PE] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 13:51:59,837 [scalp_with_trend_PE] Scheduling jobs for 1-minute interval
+2025-10-07 13:52:02,004 [scalp_with_trend_PE] [BAR_CLOSE] Fetching history for NIFTY28OCT2525200PE...
+2025-10-07 13:52:02,004 [scalp_with_trend_PE] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-10-04 to 2025-10-06
+2025-10-07 13:52:02,293 [scalp_with_trend_PE] [HISTORY] Response type: <class 'pandas.core.frame.DataFrame'>
+2025-10-07 13:52:02,293 [scalp_with_trend_PE] [HISTORY] Received DataFrame with columns: ['close', 'high', 'low', 'oi', 'open', 'volume']
+2025-10-07 13:52:02,293 [scalp_with_trend_PE] [HISTORY] DataFrame shape: (375, 6)
+2025-10-07 13:52:02,293 [scalp_with_trend_PE] [HISTORY] Timestamp found in index, resetting to column
+2025-10-07 13:52:02,295 [scalp_with_trend_PE] [HISTORY] ✅ Successfully fetched 375 bars
+2025-10-07 13:52:02,536 [scalp_with_trend_PE] [CANDLE] NIFTY28OCT2525200PE @ 2025-10-06 15:29:00+05:30
+2025-10-07 13:52:02,536 [scalp_with_trend_PE] [CANDLE] O:225.60 H:231.00 L:225.35 C:226.35 V:15000
+2025-10-07 13:52:02,536 [scalp_with_trend_PE] [INDICATORS] EMA_Fast:225.61 EMA_Slow:224.36 ATR:2.44
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [TREND] UP (Fast:225.61 vs Slow:224.36)
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [SIGNAL_CHECK] High:231.00 vs Prev:225.75 = BREAK
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [SIGNAL_CHECK] Low:225.35 vs Prev:224.25 = NO
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [SIGNAL_RAW] LONG=True SHORT=False
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [FILTER] Trade direction=LONG only, SHORT disabled
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] [SIGNAL_FINAL] LONG=True SHORT=False
+2025-10-07 13:52:02,537 [scalp_with_trend_PE] ⚡ [SIGNAL] LONG detected! Next entry at 2025-10-06 15:30:00+05:30
+2025-10-07 13:52:05,006 [scalp_with_trend_PE] [BAR_OPEN] Checking entry: Signal=LONG | Scheduled=2025-10-06 15:30:00+05:30 | Now=2025-10-07 13:52:05.006356+05:30 | Delta=80525.0s
+2025-10-07 13:52:05,008 [scalp_with_trend_PE] [BAR_OPEN] ⚡ Entry delta ignored (IGNORE_ENTRY_DELTA=true). Executing LONG!
+2025-10-07 13:52:05,008 [scalp_with_trend_PE] 🚀 [ENTRY] Initiating LONG entry...
+2025-10-07 13:52:05,008 [scalp_with_trend_PE] [ATM] Option auto-selection is OFF
+2025-10-07 13:52:05,008 [scalp_with_trend_PE] [ORDER] Placing BUY order for NIFTY28OCT2525200PE x 75
+2025-10-07 13:52:05,371 [scalp_with_trend_PE] [ORDER] Order placed. OrderID: 251007201425098
+2025-10-07 13:52:05,371 [scalp_with_trend_PE] [ORDER] Waiting for fill confirmation...
+2025-10-07 13:52:05,767 
+[scalp_with_trend_PE] [SHUTDOWN] Closing...
+2025-10-07 13:52:05,771 [scalp_with_trend_PE] [SHUTDOWN] Done.
+2025-10-07 13:52:06,101 [scalp_with_trend_PE] ✅ [ENTRY_FILLED] LONG position opened
+2025-10-07 13:52:06,102 [scalp_with_trend_PE] [POSITION] Symbol: NIFTY28OCT2525200PE | Qty: 75
+2025-10-07 13:52:06,102 [scalp_with_trend_PE] [POSITION] Entry: ₹168.05
+2025-10-07 13:52:06,102 [scalp_with_trend_PE] [POSITION] Target: ₹171.05 (+3.0 pts = ₹225.00)
+2025-10-07 13:52:06,102 [scalp_with_trend_PE] [POSITION] StopLoss: ₹165.05 (-3.0 pts = ₹225.00)
+2025-10-07 13:52:06,102 [scalp_with_trend_PE] [POSITION] Risk:Reward = 1:1.00
+2025-10-07 13:52:06,405 [scalp_with_trend_PE] [EXITS] TP oid=251007201425151 @ 171.05 | SL oid=None @ 165.05
+2025-10-07 13:52:07,273 [scalp_with_trend_PE] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 13:52:07,273 [scalp_with_trend_PE] [VALIDATION] Detected option symbol format
+2025-10-07 13:52:07,351 [scalp_with_trend_PE] [VALIDATION] Quotes API returned: error
+2025-10-07 13:52:07,352 [scalp_with_trend_PE] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 13:52:07,366 [scalp_with_trend_PE] Using fallback lot size for NIFTY28OCT2525200PE (detected NIFTY): 75
+2025-10-07 13:52:07,367 
+[scalp_with_trend_PE] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 3.0,
+  "stoploss_points": 3.0,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 3,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true
+}
+2025-10-07 13:52:07,367 [scalp_with_trend_PE] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 13:52:07,367 [scalp_with_trend_PE] Scheduling jobs for 1-minute interval
+2025-10-07 13:52:18,676 [scalp_with_trend_PE] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 13:52:18,676 [scalp_with_trend_PE] [VALIDATION] Detected option symbol format
+2025-10-07 13:52:18,751 [scalp_with_trend_PE] [VALIDATION] Quotes API returned: error
+2025-10-07 13:52:18,751 [scalp_with_trend_PE] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 13:52:18,764 [scalp_with_trend_PE] Using fallback lot size for NIFTY28OCT2525200PE (detected NIFTY): 75
+2025-10-07 13:52:18,765 
+[scalp_with_trend_PE] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 3.0,
+  "stoploss_points": 3.0,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 3,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true
+}
+2025-10-07 13:52:18,765 [scalp_with_trend_PE] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 13:52:18,765 [scalp_with_trend_PE] Scheduling jobs for 1-minute interval
+2025-10-07 13:52:25,026 
+[scalp_with_trend_PE] [SHUTDOWN] Closing...
+2025-10-07 13:52:25,090 [scalp_with_trend_PE] [SHUTDOWN] Done.
+2025-10-07 13:53:02,004 [scalp_with_trend_PE] [BAR_CLOSE] Fetching history for NIFTY28OCT2525200PE...
+2025-10-07 13:53:02,006 [scalp_with_trend_PE] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-10-04 to 2025-10-06
+2025-10-07 13:53:02,113 [scalp_with_trend_PE] [HISTORY] Response type: <class 'dict'>
+2025-10-07 13:53:02,113 [scalp_with_trend_PE] [ERROR] API returned error response: {'status': 'error', 'message': 'HTTP 403: Access Denied: Your IP has been banned', 'code': 403, 'error_type': 'http_error'}
+2025-10-07 13:53:02,113 [scalp_with_trend_PE] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 13:53:05,008 [scalp_with_trend_PE] [BAR_OPEN] No pending signal
+2025-10-07 13:54:02,001 [scalp_with_trend_PE] [BAR_CLOSE] Fetching history for NIFTY28OCT2525200PE...
+2025-10-07 13:54:02,003 [scalp_with_trend_PE] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-10-04 to 2025-10-06
+2025-10-07 13:54:02,104 [scalp_with_trend_PE] [HISTORY] Response type: <class 'dict'>
+2025-10-07 13:54:02,104 [scalp_with_trend_PE] [ERROR] API returned error response: {'status': 'error', 'message': 'HTTP 403: Access Denied: Your IP has been banned', 'code': 403, 'error_type': 'http_error'}
+2025-10-07 13:54:02,104 [scalp_with_trend_PE] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 13:54:05,004 [scalp_with_trend_PE] [BAR_OPEN] No pending signal
+2025-10-07 13:54:09,485 
+[scalp_with_trend_PE] [SHUTDOWN] Closing...
+2025-10-07 13:54:09,550 [scalp_with_trend_PE] [SHUTDOWN] Done.

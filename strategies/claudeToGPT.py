@@ -69,7 +69,7 @@ class Config:
     ws_url: Optional[str] = os.getenv("OPENALGO_WS_URL", "ws://127.0.0.1:8765")
 
     # Instrument selection
-    symbol: str = os.getenv("SYMBOL", "NIFTY28OCT2525100CE")         # Can be index (NIFTY/BANKNIFTY/FINNIFTY) or an exact tradable symbol
+    symbol: str = os.getenv("SYMBOL", "NIFTY28OCT2525200PE")         # Can be index (NIFTY/BANKNIFTY/FINNIFTY) or an exact tradable symbol
     exchange: str = os.getenv("EXCHANGE", "NFO")       # Futures/Options exchange
     product: str = os.getenv("PRODUCT", "MIS")         # MIS (intraday)
     lots: int = int(os.getenv("LOTS", 1))              # Lot multiplier
@@ -94,10 +94,10 @@ class Config:
     atr_min_points: float = float(os.getenv("ATR_MIN_POINTS", 2.0))
 
     # Risk
-    target_points: float = float(os.getenv("TARGET_POINTS", 8.0))
-    stoploss_points: float = float(os.getenv("STOPLOSS_POINTS", 25.0))
+    target_points: float = float(os.getenv("TARGET_POINTS", 2.50))
+    stoploss_points: float = float(os.getenv("STOPLOSS_POINTS", 2.50))
     confirm_trend_at_entry: bool = os.getenv("CONFIRM_TREND_AT_ENTRY", "true").lower() == "true"
-    trade_direction: str = os.getenv("TRADE_DIRECTION", "both").lower()  # "long", "short", or "both"
+    trade_direction: str = os.getenv("TRADE_DIRECTION", "long").lower()  # "long", "short", or "both"
     daily_loss_cap: float = float(os.getenv("DAILY_LOSS_CAP", -1000.0))
 
     # EOD square-off
@@ -105,7 +105,7 @@ class Config:
     square_off_time: Tuple[int, int] = (15, 25)
 
     # History fetch
-    warmup_days: int = int(os.getenv("WARMUP_DAYS", 3))
+    warmup_days: int = int(os.getenv("WARMUP_DAYS", 2))
     history_start_date: Optional[str] = os.getenv("HISTORY_START_DATE")
     history_end_date: Optional[str] = os.getenv("HISTORY_END_DATE")
 
@@ -118,6 +118,18 @@ class Config:
 
     # Entry timing
     ignore_entry_delta: bool = os.getenv("IGNORE_ENTRY_DELTA", "true").lower() == "true"  # Ignore entry window timing
+
+    # Position reconciliation
+    check_position_on_startup: bool = os.getenv("CHECK_POSITION_ON_STARTUP", "true").lower() == "true"  # Verify state.json against actual broker positions
+
+    # History optimization
+    skip_history_fetch: bool = os.getenv("SKIP_HISTORY_FETCH", "true").lower() == "true"  # Skip historical data (use live data only)
+
+    # History caching (CSV-based)
+    use_history_cache: bool = os.getenv("USE_HISTORY_CACHE", "true").lower() == "true"  # Cache history to CSV
+    history_cache_dir: str = os.getenv("HISTORY_CACHE_DIR", "history_cache")  # Cache directory
+    history_days: int = int(os.getenv("HISTORY_DAYS", 2))  # Days of history to cache
+    force_refresh_cache: bool = os.getenv("FORCE_REFRESH_CACHE", "false").lower() == "true"  # Force re-download
 
 # ----------------------------
 # Logging + Persistence
@@ -179,6 +191,67 @@ def load_state(bot):
             bot.symbol_in_use = state.get("symbol_in_use", bot.cfg.symbol)
     except Exception as e:
         log(f"[{STRATEGY_NAME}] [WARN] Failed to load state: {e}")
+
+def reconcile_position(bot):
+    """
+    Check if state.json matches actual broker positions.
+    If position was manually closed, update state.json accordingly.
+    """
+    if not bot.cfg.check_position_on_startup:
+        log(f"[{STRATEGY_NAME}] [RECONCILE] Position check disabled (CHECK_POSITION_ON_STARTUP=false)")
+        return
+
+    if not bot.in_position:
+        log(f"[{STRATEGY_NAME}] [RECONCILE] No position in state.json - nothing to reconcile")
+        return
+
+    try:
+        log(f"[{STRATEGY_NAME}] [RECONCILE] Checking broker positions for {bot.symbol_in_use}...")
+
+        # Get positions from broker
+        positions_resp = bot.client.positions(strategy=STRATEGY_NAME)
+
+        if positions_resp.get('status') != 'success':
+            log(f"[{STRATEGY_NAME}] [RECONCILE] ⚠️ Could not fetch positions: {positions_resp}")
+            return
+
+        positions = positions_resp.get('data', [])
+        log(f"[{STRATEGY_NAME}] [RECONCILE] Found {len(positions)} position(s) in broker")
+
+        # Look for our symbol
+        found_position = None
+        for pos in positions:
+            pos_symbol = pos.get('symbol', '').upper()
+            if pos_symbol == bot.symbol_in_use.upper():
+                found_position = pos
+                break
+
+        if found_position:
+            # Position exists in broker
+            quantity = int(found_position.get('quantity', 0) or 0)
+            net_qty = int(found_position.get('netqty', 0) or 0)
+
+            log(f"[{STRATEGY_NAME}] [RECONCILE] ✅ Position found: {bot.symbol_in_use} | Qty={quantity} | NetQty={net_qty}")
+
+            if net_qty == 0:
+                # Position closed but still in response (daytrade closed)
+                log(f"[{STRATEGY_NAME}] [RECONCILE] 🔄 Position closed (NetQty=0). Updating state.json...")
+                bot._flat_state()
+                save_state(bot)
+                log(f"[{STRATEGY_NAME}] [RECONCILE] ✅ State cleared - position was manually closed")
+            else:
+                log(f"[{STRATEGY_NAME}] [RECONCILE] ✅ Position matches state.json")
+        else:
+            # Position NOT found in broker
+            log(f"[{STRATEGY_NAME}] [RECONCILE] ⚠️ Position in state.json but NOT in broker!")
+            log(f"[{STRATEGY_NAME}] [RECONCILE] 🔄 Position was manually closed. Updating state.json...")
+            bot._flat_state()
+            save_state(bot)
+            log(f"[{STRATEGY_NAME}] [RECONCILE] ✅ State cleared - position was manually closed")
+
+    except Exception as e:
+        log(f"[{STRATEGY_NAME}] [RECONCILE] ⚠️ Position reconciliation failed: {e}")
+        log(f"[{STRATEGY_NAME}] [RECONCILE] Continuing with state.json values...")
 
 # ----------------------------
 # Utilities
@@ -355,6 +428,171 @@ def get_history(client, cfg: Config, symbol: Optional[str] = None) -> pd.DataFra
     log(f"[{STRATEGY_NAME}] [HISTORY] ✅ Successfully fetched {len(df)} bars")
     return df[["timestamp","open","high","low","close","volume"]].sort_values("timestamp").reset_index(drop=True)
 
+def get_cache_filename(cfg: Config, symbol: str) -> str:
+    """Get the cache filename for a given symbol"""
+    # Sanitize symbol name for filesystem
+    safe_symbol = symbol.replace("/", "_").replace("\\", "_")
+    cache_dir = cfg.history_cache_dir
+    return os.path.join(cache_dir, f"{safe_symbol}_history.csv")
+
+def load_history_from_cache(cfg: Config, symbol: str) -> Optional[pd.DataFrame]:
+    """Load historical data from CSV cache if available"""
+    if not cfg.use_history_cache:
+        return None
+
+    cache_file = get_cache_filename(cfg, symbol)
+
+    if not os.path.exists(cache_file):
+        log(f"[{STRATEGY_NAME}] [CACHE] No cache file found: {cache_file}")
+        return None
+
+    try:
+        # Check file age
+        file_mtime = os.path.getmtime(cache_file)
+        file_date = datetime.fromtimestamp(file_mtime, IST).date()
+        today = now_ist().date()
+
+        if cfg.force_refresh_cache:
+            log(f"[{STRATEGY_NAME}] [CACHE] Force refresh enabled, ignoring cache")
+            return None
+
+        if file_date < today:
+            log(f"[{STRATEGY_NAME}] [CACHE] Cache is from previous day ({file_date}), will refresh")
+            return None
+
+        # Load CSV
+        log(f"[{STRATEGY_NAME}] [CACHE] Loading from {cache_file}...")
+        df = pd.read_csv(cache_file)
+
+        # Validate required columns
+        required_cols = ["timestamp", "open", "high", "low", "close", "volume"]
+        if not all(col in df.columns for col in required_cols):
+            log(f"[{STRATEGY_NAME}] [CACHE] Invalid cache format, missing columns")
+            return None
+
+        # Parse timestamp
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        if df["timestamp"].dt.tz is None:
+            df["timestamp"] = df["timestamp"].dt.tz_localize("Asia/Kolkata")
+        else:
+            df["timestamp"] = df["timestamp"].dt.tz_convert("Asia/Kolkata")
+
+        log(f"[{STRATEGY_NAME}] [CACHE] ✅ Loaded {len(df)} bars from cache")
+        return df
+
+    except Exception as e:
+        log(f"[{STRATEGY_NAME}] [CACHE] ⚠️ Failed to load cache: {e}")
+        return None
+
+def save_history_to_cache(cfg: Config, symbol: str, df: pd.DataFrame):
+    """Save historical data to CSV cache"""
+    if not cfg.use_history_cache:
+        return
+
+    try:
+        # Create cache directory if needed
+        os.makedirs(cfg.history_cache_dir, exist_ok=True)
+
+        cache_file = get_cache_filename(cfg, symbol)
+
+        # Save to CSV
+        df.to_csv(cache_file, index=False)
+
+        log(f"[{STRATEGY_NAME}] [CACHE] ✅ Saved {len(df)} bars to {cache_file}")
+
+    except Exception as e:
+        log(f"[{STRATEGY_NAME}] [CACHE] ⚠️ Failed to save cache: {e}")
+
+def append_live_candles_to_history(historical_df: pd.DataFrame, live_df: pd.DataFrame) -> pd.DataFrame:
+    """Merge cached history with today's live candles"""
+    if live_df.empty:
+        return historical_df
+
+    try:
+        # Combine dataframes
+        combined = pd.concat([historical_df, live_df], ignore_index=True)
+
+        # Remove duplicates based on timestamp (keep latest)
+        combined = combined.drop_duplicates(subset=['timestamp'], keep='last')
+
+        # Sort by timestamp
+        combined = combined.sort_values('timestamp').reset_index(drop=True)
+
+        log(f"[{STRATEGY_NAME}] [CACHE] Merged {len(historical_df)} cached + {len(live_df)} live = {len(combined)} total bars")
+
+        return combined
+
+    except Exception as e:
+        log(f"[{STRATEGY_NAME}] [CACHE] ⚠️ Failed to merge live candles: {e}")
+        return historical_df
+
+def get_historical_data(client, cfg: Config, symbol: Optional[str] = None) -> pd.DataFrame:
+    """
+    Get historical data with caching support.
+    1. Try to load from CSV cache
+    2. If not found or stale, fetch from API and save to cache
+    3. Return dataframe with indicators computed
+    """
+    sym = symbol or cfg.symbol
+
+    # Try cache first
+    if cfg.use_history_cache and not cfg.force_refresh_cache:
+        cached_df = load_history_from_cache(cfg, sym)
+        if cached_df is not None:
+            # Compute indicators if not already present
+            if "ema_fast" not in cached_df.columns:
+                cached_df = compute_indicators(cached_df, cfg)
+            return cached_df
+
+    # Cache miss or disabled - fetch from API
+    log(f"[{STRATEGY_NAME}] [CACHE] Fetching {cfg.history_days} days of history from API...")
+
+    today = now_ist().date()
+    start_date = (today - timedelta(days=cfg.history_days)).strftime("%Y-%m-%d")
+    end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} interval={cfg.interval} from {start_date} to {end_date}")
+
+    try:
+        df = client.history(symbol=sym, exchange=cfg.exchange, interval=cfg.interval,
+                           start_date=start_date, end_date=end_date)
+    except Exception as e:
+        log(f"[{STRATEGY_NAME}] [ERROR] history() API call failed: {e}")
+        raise
+
+    # Validate response
+    if isinstance(df, dict):
+        error_msg = df.get('message', df.get('error', 'Unknown error'))
+        raise ValueError(f"history() API error: {error_msg}")
+
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        raise ValueError("history() returned empty or invalid data")
+
+    # Process timestamp
+    if "timestamp" not in df.columns:
+        if df.index.name == "timestamp" or isinstance(df.index, pd.DatetimeIndex):
+            df = df.reset_index()
+        else:
+            raise ValueError(f"Missing 'timestamp' column. Got: {list(df.columns)}")
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    if df["timestamp"].dt.tz is None:
+        df["timestamp"] = df["timestamp"].dt.tz_localize("Asia/Kolkata")
+    else:
+        df["timestamp"] = df["timestamp"].dt.tz_convert("Asia/Kolkata")
+
+    df = df[["timestamp","open","high","low","close","volume"]].sort_values("timestamp").reset_index(drop=True)
+
+    log(f"[{STRATEGY_NAME}] [HISTORY] ✅ Successfully fetched {len(df)} bars")
+
+    # Compute indicators
+    df = compute_indicators(df, cfg)
+
+    # Save to cache
+    save_history_to_cache(cfg, sym, df)
+
+    return df
+
 def get_spot_exchange(underlying_symbol: str) -> str:
     """Get the correct exchange for spot price lookup"""
     index_map = {
@@ -499,11 +737,20 @@ class ScalpWithTrendBot:
         self.realized_pnl_today: float = 0.0
         self.today: date = now_ist().date()
 
+        # Live data buffer (for skip_history_fetch mode)
+        self.live_df: pd.DataFrame = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        self.current_candle: Dict = {}  # Track current building candle
+        if self.cfg.use_history_cache:
+            os.makedirs(self.cfg.history_cache_dir, exist_ok=True)
+        self.cached_history_df: pd.DataFrame = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        self._cache_loaded_for: Optional[Tuple[str, date]] = None
+
     def start(self):
         # required by your standard
         print("🔁 OpenAlgo Python Bot is running.")
         log(f"\n[{STRATEGY_NAME}] Bot is starting.\nConfig: {json.dumps(asdict(self.cfg), indent=2)}")
         load_state(self)
+        reconcile_position(self)  # Check if position matches broker
         log(f"[{STRATEGY_NAME}] Resolved quantity for {self.symbol_in_use}: {self.qty}")
 
         # Jobs - schedule based on configured interval
@@ -545,14 +792,59 @@ class ScalpWithTrendBot:
             log(f"[{STRATEGY_NAME}] [WARN] Unknown interval format '{interval}', defaulting to 5 minutes")
             return 5
 
+    def _ensure_cache_loaded(self):
+        """Load cached history once per day per symbol to support skip-history mode."""
+        if not self.cfg.use_history_cache:
+            return
+
+        cache_key = (self.symbol_in_use, now_ist().date())
+        if self._cache_loaded_for == cache_key:
+            return
+
+        cached_df = load_history_from_cache(self.cfg, self.symbol_in_use)
+        if cached_df is not None:
+            self.cached_history_df = cached_df
+        else:
+            # Keep an empty frame with expected columns for downstream merges
+            self.cached_history_df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        self._cache_loaded_for = cache_key
+
     # ----- Jobs -----
     def on_bar_close_tick(self):
         if not in_session(now_ist().time(), self.cfg.session_windows):
             return
         try:
-            # Always compute indicators on the active/symbol_in_use (index if not in position; if option, still OK)
-            log(f"[{STRATEGY_NAME}] [BAR_CLOSE] Fetching history for {self.symbol_in_use}...")
-            df = compute_indicators(get_history(self.client, self.cfg, symbol=self.symbol_in_use), self.cfg)
+            # Get historical data (with caching support)
+            if self.cfg.skip_history_fetch:
+                log(f"[{STRATEGY_NAME}] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)")
+                self._ensure_cache_loaded()
+
+                live_df = getattr(self, "live_df", pd.DataFrame())
+                has_live = not live_df.empty
+                has_cache = not self.cached_history_df.empty
+
+                if has_cache and has_live:
+                    df = append_live_candles_to_history(self.cached_history_df, live_df)
+                    df = compute_indicators(df, self.cfg)
+                elif has_live:
+                    df = live_df
+                elif has_cache:
+                    log(f"[{STRATEGY_NAME}] [WARN] Cache loaded but waiting for first live candle")
+                    return
+                else:
+                    log(f"[{STRATEGY_NAME}] [WARN] No historical cache and no live data yet - set SKIP_HISTORY_FETCH=false once to bootstrap history")
+                    return
+            else:
+                # Get cached historical data + append today's live candles
+                log(f"[{STRATEGY_NAME}] [BAR_CLOSE] Getting historical data for {self.symbol_in_use}...")
+                df = get_historical_data(self.client, self.cfg, symbol=self.symbol_in_use)
+
+                # Append any live candles we've built today
+                if hasattr(self, 'live_df') and not self.live_df.empty:
+                    df = append_live_candles_to_history(df, self.live_df)
+                    # Recompute indicators with combined data
+                    df = compute_indicators(df, self.cfg)
+
             i = len(df) - 1
             if i < 1:
                 log(f"[{STRATEGY_NAME}] [WARN] Insufficient data: {len(df)} bars")
@@ -913,6 +1205,57 @@ class ScalpWithTrendBot:
     def _clear_pending_signal(self):
         self.pending_signal = None
         self.next_entry_time = None
+
+    def _update_live_candle(self, ltp: float, volume: float = 0):
+        """
+        Update the current live candle with tick data.
+        For use with SKIP_HISTORY_FETCH mode.
+        """
+        now = now_ist()
+        interval_minutes = self._parse_interval_minutes(self.cfg.interval)
+
+        # Round down to nearest interval boundary
+        candle_minute = (now.minute // interval_minutes) * interval_minutes
+        candle_time = now.replace(minute=candle_minute, second=0, microsecond=0)
+
+        if not self.current_candle or self.current_candle.get('timestamp') != candle_time:
+            # New candle started - finalize previous and start new
+            if self.current_candle:
+                self._finalize_candle()
+
+            self.current_candle = {
+                'timestamp': candle_time,
+                'open': ltp,
+                'high': ltp,
+                'low': ltp,
+                'close': ltp,
+                'volume': volume
+            }
+        else:
+            # Update existing candle
+            self.current_candle['high'] = max(self.current_candle['high'], ltp)
+            self.current_candle['low'] = min(self.current_candle['low'], ltp)
+            self.current_candle['close'] = ltp
+            self.current_candle['volume'] += volume
+
+    def _finalize_candle(self):
+        """Add completed candle to live_df and compute indicators"""
+        if not self.current_candle:
+            return
+
+        # Add to dataframe
+        new_row = pd.DataFrame([self.current_candle])
+        self.live_df = pd.concat([self.live_df, new_row], ignore_index=True)
+
+        # Keep only last N candles (memory optimization)
+        max_bars = max(self.cfg.ema_slow, self.cfg.atr_window) + 50
+        if len(self.live_df) > max_bars:
+            self.live_df = self.live_df.tail(max_bars).reset_index(drop=True)
+
+        # Compute indicators
+        self.live_df = compute_indicators(self.live_df, self.cfg)
+
+        log(f"[{STRATEGY_NAME}] [LIVE_CANDLE] Finalized: {self.current_candle['timestamp']} | O:{self.current_candle['open']:.2f} H:{self.current_candle['high']:.2f} L:{self.current_candle['low']:.2f} C:{self.current_candle['close']:.2f}")
 
     def _graceful_exit(self, *args):
         log(f"\n[{STRATEGY_NAME}] [SHUTDOWN] Closing...")

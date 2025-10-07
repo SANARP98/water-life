@@ -506,3 +506,314 @@ Config: {
 2025-10-07 13:46:05,315 [scalp_with_trend] [ORDER] Order placed. OrderID: 251007201400263
 2025-10-07 13:46:05,315 [scalp_with_trend] [ORDER] Waiting for fill confirmation...
 2025-10-07 13:46:05,983 [scalp_with_trend] ⚠️ [WARN] Entry price not available yet. Order status: rejected
+2025-10-07 13:52:29,049 [scalp_with_trend] [VALIDATION] Validating NIFTY28OCT2525100CE on NFO...
+2025-10-07 13:52:29,049 [scalp_with_trend] [VALIDATION] Detected option symbol format
+2025-10-07 13:52:29,132 [scalp_with_trend] [VALIDATION] Quotes API returned: error
+2025-10-07 13:52:29,132 [scalp_with_trend] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 13:52:29,147 [scalp_with_trend] Using fallback lot size for NIFTY28OCT2525100CE (detected NIFTY): 75
+2025-10-07 13:52:29,147 
+[scalp_with_trend] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525100CE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 3.0,
+  "stoploss_points": 3.0,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 3,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true
+}
+2025-10-07 13:52:29,148 [scalp_with_trend] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 13:52:29,148 [scalp_with_trend] Scheduling jobs for 1-minute interval
+2025-10-07 13:52:37,874 
+[scalp_with_trend] [SHUTDOWN] Closing...
+2025-10-07 13:52:37,952 [scalp_with_trend] [SHUTDOWN] Done.
+2025-10-07 13:52:50,157 [scalp_with_trend] [VALIDATION] Validating NIFTY28OCT2525100CE on NFO...
+2025-10-07 13:52:50,157 [scalp_with_trend] [VALIDATION] Detected option symbol format
+2025-10-07 13:52:50,240 [scalp_with_trend] [VALIDATION] Quotes API returned: error
+2025-10-07 13:52:50,240 [scalp_with_trend] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 13:52:50,257 [scalp_with_trend] Using fallback lot size for NIFTY28OCT2525100CE (detected NIFTY): 75
+2025-10-07 13:52:50,260 
+[scalp_with_trend] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525100CE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 3.0,
+  "stoploss_points": 3.0,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 3,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true
+}
+2025-10-07 13:52:50,260 [scalp_with_trend] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 13:52:50,260 [scalp_with_trend] Scheduling jobs for 1-minute interval
+2025-10-07 13:53:02,003 [scalp_with_trend] [BAR_CLOSE] Fetching history for NIFTY28OCT2525200PE...
+2025-10-07 13:53:02,006 [scalp_with_trend] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-10-04 to 2025-10-06
+2025-10-07 13:53:02,116 [scalp_with_trend] [HISTORY] Response type: <class 'dict'>
+2025-10-07 13:53:02,116 [scalp_with_trend] [ERROR] API returned error response: {'status': 'error', 'message': 'HTTP 403: Access Denied: Your IP has been banned', 'code': 403, 'error_type': 'http_error'}
+2025-10-07 13:53:02,116 [scalp_with_trend] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 13:53:05,008 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 13:53:08,828 
+[scalp_with_trend] [SHUTDOWN] Closing...
+2025-10-07 13:53:08,906 [scalp_with_trend] [SHUTDOWN] Done.
+2025-10-07 14:16:14,459 [scalp_with_trend] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 14:16:14,459 [scalp_with_trend] [VALIDATION] Detected option symbol format
+2025-10-07 14:16:14,548 [scalp_with_trend] [VALIDATION] Quotes API returned: error
+2025-10-07 14:16:14,548 [scalp_with_trend] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 14:16:14,564 [scalp_with_trend] Using fallback lot size for NIFTY28OCT2525200PE (detected NIFTY): 75
+2025-10-07 14:16:14,568 
+[scalp_with_trend] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 2.5,
+  "stoploss_points": 2.5,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 25,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true,
+  "check_position_on_startup": true,
+  "skip_history_fetch": false,
+  "use_history_cache": true,
+  "history_cache_dir": "history_cache",
+  "history_days": 25,
+  "force_refresh_cache": false
+}
+2025-10-07 14:16:14,568 [scalp_with_trend] [RECONCILE] Checking broker positions for NIFTY28OCT2525200PE...
+2025-10-07 14:16:14,568 [scalp_with_trend] [RECONCILE] ⚠️ Position reconciliation failed: 'api' object has no attribute 'positions'
+2025-10-07 14:16:14,568 [scalp_with_trend] [RECONCILE] Continuing with state.json values...
+2025-10-07 14:16:14,568 [scalp_with_trend] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 14:16:14,568 [scalp_with_trend] Scheduling jobs for 1-minute interval
+2025-10-07 14:17:02,002 [scalp_with_trend] [BAR_CLOSE] Getting historical data for NIFTY28OCT2525200PE...
+2025-10-07 14:17:02,003 [scalp_with_trend] [CACHE] No cache file found: history_cache/NIFTY28OCT2525200PE_history.csv
+2025-10-07 14:17:02,003 [scalp_with_trend] [CACHE] Fetching 25 days of history from API...
+2025-10-07 14:17:02,003 [scalp_with_trend] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-09-12 to 2025-10-06
+2025-10-07 14:17:02,074 [scalp_with_trend] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 14:17:05,005 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:18:02,007 [scalp_with_trend] [BAR_CLOSE] Getting historical data for NIFTY28OCT2525200PE...
+2025-10-07 14:18:02,014 [scalp_with_trend] [CACHE] No cache file found: history_cache/NIFTY28OCT2525200PE_history.csv
+2025-10-07 14:18:02,014 [scalp_with_trend] [CACHE] Fetching 25 days of history from API...
+2025-10-07 14:18:02,014 [scalp_with_trend] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-09-12 to 2025-10-06
+2025-10-07 14:18:02,099 [scalp_with_trend] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 14:18:05,007 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:19:02,014 [scalp_with_trend] [BAR_CLOSE] Getting historical data for NIFTY28OCT2525200PE...
+2025-10-07 14:19:02,016 [scalp_with_trend] [CACHE] No cache file found: history_cache/NIFTY28OCT2525200PE_history.csv
+2025-10-07 14:19:02,016 [scalp_with_trend] [CACHE] Fetching 25 days of history from API...
+2025-10-07 14:19:02,016 [scalp_with_trend] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-09-12 to 2025-10-06
+2025-10-07 14:19:02,103 [scalp_with_trend] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 14:19:05,004 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:20:02,001 [scalp_with_trend] [BAR_CLOSE] Getting historical data for NIFTY28OCT2525200PE...
+2025-10-07 14:20:02,002 [scalp_with_trend] [CACHE] No cache file found: history_cache/NIFTY28OCT2525200PE_history.csv
+2025-10-07 14:20:02,002 [scalp_with_trend] [CACHE] Fetching 25 days of history from API...
+2025-10-07 14:20:02,002 [scalp_with_trend] [HISTORY] Fetching NIFTY28OCT2525200PE@NFO interval=1m from 2025-09-12 to 2025-10-06
+2025-10-07 14:20:02,080 [scalp_with_trend] [ERROR] on_bar_close_tick: history() API error: HTTP 403: Access Denied: Your IP has been banned
+2025-10-07 14:20:05,003 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:20:05,220 
+[scalp_with_trend] [SHUTDOWN] Closing...
+2025-10-07 14:20:05,284 [scalp_with_trend] [SHUTDOWN] Done.
+2025-10-07 14:20:36,827 [scalp_with_trend] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 14:20:36,829 [scalp_with_trend] [VALIDATION] Detected option symbol format
+2025-10-07 14:20:36,931 [scalp_with_trend] [VALIDATION] Quotes API returned: error
+2025-10-07 14:20:36,931 [scalp_with_trend] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 14:20:36,954 [scalp_with_trend] Using fallback lot size for NIFTY28OCT2525200PE (detected NIFTY): 75
+2025-10-07 14:20:36,957 
+[scalp_with_trend] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 2.5,
+  "stoploss_points": 2.5,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 2,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true,
+  "check_position_on_startup": true,
+  "skip_history_fetch": true,
+  "use_history_cache": true,
+  "history_cache_dir": "history_cache",
+  "history_days": 2,
+  "force_refresh_cache": false
+}
+2025-10-07 14:20:36,958 [scalp_with_trend] [RECONCILE] No position in state.json - nothing to reconcile
+2025-10-07 14:20:36,958 [scalp_with_trend] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 14:20:36,958 [scalp_with_trend] Scheduling jobs for 1-minute interval
+2025-10-07 14:21:02,005 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:21:02,008 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:21:05,005 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:22:02,007 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:22:02,013 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:22:05,002 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:23:02,001 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:23:02,004 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:23:05,002 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:24:02,002 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:24:02,007 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:24:05,006 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:25:02,013 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:25:02,021 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:25:05,009 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:26:02,007 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:26:02,010 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:26:05,003 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:27:02,006 [scalp_with_trend] [BAR_CLOSE] Using live data only (SKIP_HISTORY_FETCH=true)
+2025-10-07 14:27:02,008 [scalp_with_trend] [WARN] No live data yet - need at least 2 candles to generate signals
+2025-10-07 14:27:05,002 [scalp_with_trend] [BAR_OPEN] No pending signal
+2025-10-07 14:27:49,619 
+[scalp_with_trend] [SHUTDOWN] Closing...
+2025-10-07 14:27:49,631 [scalp_with_trend] [SHUTDOWN] Done.
