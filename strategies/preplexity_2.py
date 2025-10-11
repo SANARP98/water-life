@@ -141,16 +141,16 @@ def safe_api_call(func: Callable, *args, **kwargs) -> Any:
         raise
 
 
-# Fallback lot sizes for common indices/options
+# Fallback lot sizes for common indices/options (Updated to May 2025 specifications)
 INDEX_LOT_SIZES = {
-    "NIFTY": 75,
-    "BANKNIFTY": 15,
-    "FINNIFTY": 25,
-    "MIDCPNIFTY": 50,
-    "NIFTYNXT50": 10,
-    "SENSEX": 10,
-    "BANKEX": 15,
-    "SENSEX50": 10,
+    "NIFTY": 75,        # Correct
+    "BANKNIFTY": 35,    # Updated from 15
+    "FINNIFTY": 65,     # Updated from 25
+    "MIDCPNIFTY": 140,  # Updated from 50
+    "NIFTYNXT50": 25,   # Updated from 10
+    "SENSEX": 20,       # Updated from 10
+    "BANKEX": 30,       # Updated from 15
+    "SENSEX50": 60,     # Updated from 10
 }
 
 # ----------------------------
@@ -362,6 +362,22 @@ def reconcile_position(bot):
 # ----------------------------
 # Utilities
 # ----------------------------
+def normalize_interval(interval: str) -> str:
+    """
+    Normalize interval string to OpenAlgo API standard format.
+    Daily intervals must use 'D' not '1d' per OpenAlgo documentation.
+
+    Args:
+        interval: Input interval string (e.g., '1m', '5m', '1d', 'D')
+
+    Returns:
+        Normalized interval string ('D' for daily, others unchanged)
+    """
+    if interval.lower() in ("1d", "d", "day", "daily"):
+        return "D"
+    return interval
+
+
 def now_ist() -> datetime:
     return datetime.now(IST)
 
@@ -484,10 +500,12 @@ def get_history(client, cfg: Config, symbol: Optional[str] = None) -> pd.DataFra
     end_date = cfg.history_end_date or yesterday.strftime("%Y-%m-%d")
     sym = symbol or cfg.symbol
 
-    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} interval={cfg.interval} from {start_date} to {end_date}")
+    # Normalize interval for OpenAlgo API (D for daily, not 1d)
+    normalized_interval = normalize_interval(cfg.interval)
+    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} interval={normalized_interval} from {start_date} to {end_date}")
 
     try:
-        df = client.history(symbol=sym, exchange=cfg.exchange, interval=cfg.interval,
+        df = client.history(symbol=sym, exchange=cfg.exchange, interval=normalized_interval,
                             start_date=start_date, end_date=end_date)
     except Exception as e:
         log(f"[{STRATEGY_NAME}] [ERROR] history() API call failed: {e}")
@@ -657,10 +675,12 @@ def get_historical_data(client, cfg: Config, symbol: Optional[str] = None) -> pd
     start_date = (today - timedelta(days=cfg.history_days)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} interval={cfg.interval} from {start_date} to {end_date}")
+    # Normalize interval for OpenAlgo API (D for daily, not 1d)
+    normalized_interval = normalize_interval(cfg.interval)
+    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} interval={normalized_interval} from {start_date} to {end_date}")
 
     try:
-        df = client.history(symbol=sym, exchange=cfg.exchange, interval=cfg.interval,
+        df = client.history(symbol=sym, exchange=cfg.exchange, interval=normalized_interval,
                            start_date=start_date, end_date=end_date)
     except Exception as e:
         log(f"[{STRATEGY_NAME}] [ERROR] history() API call failed: {e}")
@@ -1080,7 +1100,14 @@ class ScalpWithTrendBot:
                 try:
                     orderbook_resp = safe_api_call(self.client.orderbook)
                     if orderbook_resp.get('status') == 'success':
-                        orders = orderbook_resp.get('data', {}).get('orders', [])
+                        # Defensive parsing: handle multiple possible response structures
+                        ob_data = orderbook_resp.get('data') or orderbook_resp.get('results') or {}
+                        if isinstance(ob_data, dict):
+                            orders = ob_data.get('orders', [])
+                        elif isinstance(ob_data, list):
+                            orders = ob_data  # Direct list of orders
+                        else:
+                            orders = []
 
                         # Find our TP and SL orders in the orderbook
                         for order in orders:
@@ -1196,8 +1223,17 @@ class ScalpWithTrendBot:
                 log(f"[{STRATEGY_NAME}] [EOD_RECONCILIATION] Fetching orderbook...")
                 orderbook_resp = safe_api_call(self.client.orderbook)
                 if orderbook_resp.get('status') == 'success':
-                    orders = orderbook_resp.get('data', {}).get('orders', [])
-                    stats = orderbook_resp.get('data', {}).get('statistics', {})
+                    # Defensive parsing: handle multiple possible response structures
+                    ob_data = orderbook_resp.get('data') or orderbook_resp.get('results') or {}
+                    if isinstance(ob_data, dict):
+                        orders = ob_data.get('orders', [])
+                        stats = ob_data.get('statistics', {})
+                    elif isinstance(ob_data, list):
+                        orders = ob_data
+                        stats = {}
+                    else:
+                        orders = []
+                        stats = {}
                     log(f"[{STRATEGY_NAME}] [EOD_RECONCILIATION] Orderbook: {len(orders)} order(s)")
                     log(f"[{STRATEGY_NAME}] [EOD_RECONCILIATION] Order Stats: Completed={stats.get('total_completed_orders', 0)} | Open={stats.get('total_open_orders', 0)} | Rejected={stats.get('total_rejected_orders', 0)}")
                 else:
@@ -1208,7 +1244,14 @@ class ScalpWithTrendBot:
                 log(f"[{STRATEGY_NAME}] [EOD_RECONCILIATION] Fetching tradebook...")
                 tradebook_resp = safe_api_call(self.client.tradebook)
                 if tradebook_resp.get('status') == 'success':
-                    trades = tradebook_resp.get('data', [])
+                    # Defensive parsing: handle multiple possible response structures
+                    trades_data = tradebook_resp.get('data')
+                    if isinstance(trades_data, list):
+                        trades = trades_data
+                    elif isinstance(trades_data, dict):
+                        trades = trades_data.get('trades', [])
+                    else:
+                        trades = []
                     log(f"[{STRATEGY_NAME}] [EOD_RECONCILIATION] Tradebook: {len(trades)} trade(s) today")
                     total_buy_value = sum(float(t.get('trade_value', 0)) for t in trades if t.get('action') == 'BUY')
                     total_sell_value = sum(float(t.get('trade_value', 0)) for t in trades if t.get('action') == 'SELL')
@@ -1373,8 +1416,8 @@ class ScalpWithTrendBot:
             )
 
             if basket_resp.get('status') == 'success':
-                # Extract order IDs from basket response
-                order_data = basket_resp.get('data', [])
+                # Extract order IDs from basket response (uses 'results' not 'data')
+                order_data = basket_resp.get('results', [])
                 if len(order_data) >= 2:
                     self.tp_order_id = order_data[0].get('orderid')
                     self.sl_order_id = order_data[1].get('orderid')
@@ -1535,8 +1578,9 @@ def validate_interval(client, interval: str) -> bool:
     """
     Validate if the given interval is supported by the broker.
     Falls back to common intervals if API not available.
+    Note: Daily interval uses 'D' not '1d' per OpenAlgo standard.
     """
-    common_intervals = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "1d"]
+    common_intervals = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "D"]
 
     try:
         # Try to fetch supported intervals from broker (if API exists)

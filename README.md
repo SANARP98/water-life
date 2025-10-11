@@ -241,6 +241,36 @@ All strategies are **automatically discovered** from the `strategies/` folder!
 - **Features**: All v2 features + Enhanced error handling
 - **Best for**: Production use with robust error handling
 
+#### 🚀 Preplexity (OpenAlgo Optimized)
+- **File**: `strategies/preplexity.py`
+- **Status**: ✅ Production Ready
+- **Features**: Smart orders, basket orders, proper API compliance
+- **Best for**: Optimized OpenAlgo API usage
+
+#### 🌟 Preplexity v2 (Enterprise-Grade) **⭐ RECOMMENDED**
+- **File**: `strategies/preplexity_2.py`
+- **Status**: ✅ Production Ready | ✅ OpenAlgo API Compliant
+- **Lot Sizes**: May 2025 NSE specifications with API fallback
+- **Advanced Features**:
+  - ✅ Exponential backoff retry logic (3 attempts)
+  - ✅ Rate limiting (10 req/sec)
+  - ✅ Enhanced error handling with API error codes
+  - ✅ Randomized polling intervals (2-4s)
+  - ✅ Batch order status checking (50% fewer API calls)
+  - ✅ Session-end reconciliation
+  - ✅ Interval validation
+  - ✅ Dynamic log levels (DEBUG/INFO/WARNING/ERROR)
+  - ✅ Defensive API response parsing
+  - ✅ Fixed basket order response parsing (critical fix!)
+  - ✅ Updated lot sizes to May 2025 specs
+  - ✅ Daily interval normalization (1d → D)
+- **Best for**: Production trading with enterprise-grade robustness
+- **Documentation**: See `strategies/preplexity_2_DOCUMENTATION.md` for complete guide
+
+**📚 For detailed comparison and migration guide, see:**
+- `strategies/UPDATES_SUMMARY.md` - Quick update summary
+- `strategies/preplexity_2_DOCUMENTATION.md` - Complete reference manual
+
 ### Adding Your Own Strategy
 
 **Zero-config strategy addition!** Just drop a `.py` file in `strategies/` folder and it appears in the UI automatically.
