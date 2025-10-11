@@ -208,8 +208,8 @@ def reconcile_position(bot):
     try:
         log(f"[{STRATEGY_NAME}] [RECONCILE] Checking broker positions for {bot.symbol_in_use}...")
 
-        # Get positions from broker
-        positions_resp = bot.client.positions(strategy=STRATEGY_NAME)
+        # Get positions from broker (using positionbook API)
+        positions_resp = bot.client.positionbook()
 
         if positions_resp.get('status') != 'success':
             log(f"[{STRATEGY_NAME}] [RECONCILE] ⚠️ Could not fetch positions: {positions_resp}")
@@ -608,10 +608,24 @@ def get_spot_exchange(underlying_symbol: str) -> str:
     return index_map.get(underlying_symbol.upper(), "NSE_INDEX")
 
 def get_strike_interval(underlying_symbol: str) -> int:
-    """Get strike interval for rounding"""
+    """
+    Get strike interval for rounding to ATM strike.
+
+    Note: BANKNIFTY uses 100-point intervals for ATM/near strikes,
+    and 500-point intervals for far OTM strikes. This function returns
+    100 for ATM calculation. For advanced strategies requiring far OTM
+    strikes, additional logic may be needed.
+
+    Current NSE specifications (as of 2024):
+    - NIFTY: 50 points
+    - BANKNIFTY: 100 points (ATM/near), 500 points (far)
+    - FINNIFTY: 50 points
+    - MIDCPNIFTY: 25 points
+    - NIFTYNXT50: 100 points
+    """
     intervals = {
         "NIFTY": 50,
-        "BANKNIFTY": 100,
+        "BANKNIFTY": 100,  # ATM/near strike interval
         "FINNIFTY": 50,
         "MIDCPNIFTY": 25,
         "NIFTYNXT50": 100,
@@ -987,14 +1001,16 @@ class ScalpWithTrendBot:
             self.cancel_order_silent(self.sl_order_id)
             try:
                 action = "SELL" if self.side == 'LONG' else 'BUY'
-                resp = self.client.placeorder(
+                # Use placesmartorder to ensure position is properly closed
+                resp = self.client.placesmartorder(
                     strategy=STRATEGY_NAME,
                     symbol=self.symbol_in_use,
                     exchange=self.cfg.exchange,
                     product=self.cfg.product,
                     action=action,
                     price_type="MARKET",
-                    quantity=self.qty
+                    quantity=self.qty,
+                    position_size=0  # Target: flat (no position)
                 )
                 if resp.get('status') == 'success':
                     time.sleep(0.5)
@@ -1050,14 +1066,16 @@ class ScalpWithTrendBot:
             action = "BUY" if side == 'LONG' else 'SELL'
             log(f"[{STRATEGY_NAME}] [ORDER] Placing {action} order for {self.symbol_in_use} x {self.qty}")
 
-            resp = self.client.placeorder(
+            # Use placesmartorder for position-aware order placement
+            resp = self.client.placesmartorder(
                 strategy=STRATEGY_NAME,
                 symbol=self.symbol_in_use,
                 exchange=self.cfg.exchange,
                 product=self.cfg.product,
                 action=action,
                 price_type="MARKET",
-                quantity=self.qty
+                quantity=self.qty,
+                position_size=self.qty  # Target position size
             )
 
             if resp.get('status') != 'success':
@@ -1108,56 +1126,57 @@ class ScalpWithTrendBot:
         if not self.in_position or self.entry_price is None:
             return
         try:
-            if self.side == 'LONG':
-                # TP: SELL LIMIT
-                tp_resp = self.client.placeorder(
-                    strategy=STRATEGY_NAME,
-                    symbol=self.symbol_in_use,
-                    exchange=self.cfg.exchange,
-                    product=self.cfg.product,
-                    action="SELL",
-                    price_type="LIMIT",
-                    price=self.tp_level,
-                    quantity=self.qty
-                )
-                # SL: SELL SL/SL-M
-                sl_resp = self.client.placeorder(
-                    strategy=STRATEGY_NAME,
-                    symbol=self.symbol_in_use,
-                    exchange=self.cfg.exchange,
-                    product=self.cfg.product,
-                    action="SELL",
-                    price_type=self.cfg.sl_order_type,  # "SL" or "SL-M"
-                    trigger_price=self.sl_level,
-                    quantity=self.qty
-                )
-            else:
-                # SHORT: TP BUY LIMIT
-                tp_resp = self.client.placeorder(
-                    strategy=STRATEGY_NAME,
-                    symbol=self.symbol_in_use,
-                    exchange=self.cfg.exchange,
-                    product=self.cfg.product,
-                    action="BUY",
-                    price_type="LIMIT",
-                    price=self.tp_level,
-                    quantity=self.qty
-                )
-                # SL: BUY SL/SL-M
-                sl_resp = self.client.placeorder(
-                    strategy=STRATEGY_NAME,
-                    symbol=self.symbol_in_use,
-                    exchange=self.cfg.exchange,
-                    product=self.cfg.product,
-                    action="BUY",
-                    price_type=self.cfg.sl_order_type,
-                    trigger_price=self.sl_level,
-                    quantity=self.qty
-                )
+            # Use basketorder to place TP and SL simultaneously (atomic operation)
+            exit_action = "SELL" if self.side == 'LONG' else "BUY"
 
-            self.tp_order_id = tp_resp.get('orderid')
-            self.sl_order_id = sl_resp.get('orderid')
-            log(f"[{STRATEGY_NAME}] [EXITS] TP oid={self.tp_order_id} @ {self.tp_level:.2f} | SL oid={self.sl_order_id} @ {self.sl_level:.2f}")
+            # Prepare TP order
+            tp_order = {
+                "symbol": self.symbol_in_use,
+                "exchange": self.cfg.exchange,
+                "action": exit_action,
+                "quantity": str(self.qty),
+                "pricetype": "LIMIT",
+                "price": str(self.tp_level),
+                "product": self.cfg.product
+            }
+
+            # Prepare SL order (with proper price parameter for SL type)
+            sl_order = {
+                "symbol": self.symbol_in_use,
+                "exchange": self.cfg.exchange,
+                "action": exit_action,
+                "quantity": str(self.qty),
+                "pricetype": self.cfg.sl_order_type,
+                "trigger_price": str(self.sl_level),
+                "product": self.cfg.product
+            }
+            # For SL orders: both price and trigger_price required; for SL-M: only trigger_price
+            if self.cfg.sl_order_type == "SL":
+                sl_order["price"] = str(self.sl_level)
+
+            # Place both orders in basket
+            basket_resp = self.client.basketorder(
+                strategy=STRATEGY_NAME,
+                orders=[tp_order, sl_order]
+            )
+
+            if basket_resp.get('status') == 'success':
+                # Extract order IDs from basket response
+                order_data = basket_resp.get('data', [])
+                if len(order_data) >= 2:
+                    self.tp_order_id = order_data[0].get('orderid')
+                    self.sl_order_id = order_data[1].get('orderid')
+                    log(f"[{STRATEGY_NAME}] [EXITS] Basket placed - TP oid={self.tp_order_id} @ {self.tp_level:.2f} | SL oid={self.sl_order_id} @ {self.sl_level:.2f}")
+                else:
+                    log(f"[{STRATEGY_NAME}] [WARN] Basket order response format unexpected: {basket_resp}")
+                    # Fallback: try to extract what we can
+                    if len(order_data) > 0:
+                        self.tp_order_id = order_data[0].get('orderid')
+                    if len(order_data) > 1:
+                        self.sl_order_id = order_data[1].get('orderid')
+            else:
+                log(f"[{STRATEGY_NAME}] [ERROR] Basket order failed: {basket_resp}")
+
             save_state(self)
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [ERROR] place_exit_legs: {e}")
@@ -1262,14 +1281,16 @@ class ScalpWithTrendBot:
         try:
             if self.in_position:
                 action = 'SELL' if self.side == 'LONG' else 'BUY'
-                self.client.placeorder(
+                # Use placesmartorder for graceful exit
+                self.client.placesmartorder(
                     strategy=STRATEGY_NAME,
                     symbol=self.symbol_in_use,
                     exchange=self.cfg.exchange,
                     product=self.cfg.product,
                     action=action,
                     price_type="MARKET",
-                    quantity=self.qty
+                    quantity=self.qty,
+                    position_size=0  # Target: flat (no position)
                 )
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] Shutdown exit failed: {e}")

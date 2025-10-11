@@ -817,3 +817,72 @@ Config: {
 2025-10-07 14:27:49,619 
 [scalp_with_trend] [SHUTDOWN] Closing...
 2025-10-07 14:27:49,631 [scalp_with_trend] [SHUTDOWN] Done.
+2025-10-07 15:18:53,005 [scalp_with_trend] [VALIDATION] Validating NIFTY28OCT2525200PE on NFO...
+2025-10-07 15:18:53,006 [scalp_with_trend] [VALIDATION] Detected option symbol format
+2025-10-07 15:18:53,104 [scalp_with_trend] [VALIDATION] Quotes API returned: error
+2025-10-07 15:18:53,104 [scalp_with_trend] [VALIDATION] ✅ Assuming option symbol is valid (fail-open)
+2025-10-07 15:18:53,116 [scalp_with_trend] Using fallback lot size for NIFTY28OCT2525200PE (detected NIFTY): 75
+2025-10-07 15:18:53,119 
+[scalp_with_trend] Bot is starting.
+Config: {
+  "api_key": "d663120f3a896e0e177cc83b8176932a99175d0eee98ec45106cc8779bcc9280",
+  "api_host": "http://localhost:5001/",
+  "ws_url": "ws://localhost:8765",
+  "symbol": "NIFTY28OCT2525200PE",
+  "exchange": "NFO",
+  "product": "MIS",
+  "lots": 1,
+  "interval": "1m",
+  "log_to_file": true,
+  "test_mode": false,
+  "persist_state": true,
+  "option_auto": false,
+  "session_windows": [
+    [
+      9,
+      20,
+      11,
+      0
+    ],
+    [
+      11,
+      15,
+      15,
+      15
+    ]
+  ],
+  "ema_fast": 3,
+  "ema_slow": 10,
+  "atr_window": 14,
+  "atr_min_points": 2.0,
+  "target_points": 2.5,
+  "stoploss_points": 2.5,
+  "confirm_trend_at_entry": true,
+  "trade_direction": "long",
+  "daily_loss_cap": -1000.0,
+  "enable_eod_square_off": true,
+  "square_off_time": [
+    15,
+    25
+  ],
+  "warmup_days": 2,
+  "history_start_date": null,
+  "history_end_date": null,
+  "brokerage_per_trade": 20.0,
+  "slippage_points": 0.1,
+  "sl_order_type": "SL-M",
+  "ignore_entry_delta": true,
+  "check_position_on_startup": true,
+  "skip_history_fetch": true,
+  "use_history_cache": true,
+  "history_cache_dir": "history_cache",
+  "history_days": 2,
+  "force_refresh_cache": false
+}
+2025-10-07 15:18:53,119 [scalp_with_trend] [RECONCILE] No position in state.json - nothing to reconcile
+2025-10-07 15:18:53,120 [scalp_with_trend] Resolved quantity for NIFTY28OCT2525200PE: 75
+2025-10-07 15:18:53,120 [scalp_with_trend] Scheduling jobs for 1-minute interval
+2025-10-07 15:19:05,010 [scalp_with_trend] [BAR_OPEN] Outside session windows at 15:19:05.009933
+2025-10-07 15:19:15,366 
+[scalp_with_trend] [SHUTDOWN] Closing...
+2025-10-07 15:19:15,368 [scalp_with_trend] [SHUTDOWN] Done.
