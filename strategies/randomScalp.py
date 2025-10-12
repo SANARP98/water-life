@@ -274,7 +274,7 @@ def get_history(client, cfg: Config, symbol: Optional[str] = None) -> pd.DataFra
 # ----------------------------
 # Trading Engine
 # ----------------------------
-class ScalpWithTrendBot:
+class RandomScalpBot:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.client = openalgo.simulator(api_key=cfg.api_key) if cfg.test_mode else openalgo.api(api_key=cfg.api_key, host=cfg.api_host, ws_url=cfg.ws_url)
@@ -350,6 +350,38 @@ class ScalpWithTrendBot:
         self.place_entry()
 
     # ---- Orders
+
+    def check_order_status(self):
+        """Poll sibling orders to implement OCO safety."""
+        if not self.in_position:
+            return
+
+        try:
+            if self.tp_order_id:
+                resp = self.client.orderstatus(order_id=self.tp_order_id, strategy=STRATEGY_NAME)
+                if resp.get('status') == 'success':
+                    status = str(resp.get('data', {}).get('order_status', '')).upper()
+                    if status == 'COMPLETE':
+                        price = float(resp.get('data', {}).get('average_price', 0) or 0)
+                        self.cancel_order_silent(self.sl_order_id)
+                        self._realize_exit(price, "Target Hit")
+                        return
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] TP status check failed: {e}")
+
+        try:
+            if self.sl_order_id:
+                resp = self.client.orderstatus(order_id=self.sl_order_id, strategy=STRATEGY_NAME)
+                if resp.get('status') == 'success':
+                    status = str(resp.get('data', {}).get('order_status', '')).upper()
+                    if status == 'COMPLETE':
+                        price = float(resp.get('data', {}).get('average_price', 0) or 0)
+                        self.cancel_order_silent(self.tp_order_id)
+                        self._realize_exit(price, "Stoploss Hit")
+                        return
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] SL status check failed: {e}")
+
     def place_entry(self):
         try:
             action = "BUY"  # long-only to mirror backtest
@@ -523,25 +555,39 @@ class ScalpWithTrendBot:
             sys.exit(1)
 
         # Schedule bar close/open ticks
-        iv = self._parse_interval_minutes(self.cfg.interval)
-        # Close ~ at :59s of each interval bucket
-        self.scheduler.add_job(self.on_bar_close,
-                               CronTrigger(minute=f"*/{iv}", second="55", timezone=IST))
-        # Open ~ shortly after new bar starts
-        self.scheduler.add_job(self.on_bar_open,
-                               CronTrigger(minute=f"*/{iv}", second="1", timezone=IST))
+        interval_str = self.cfg.interval.strip().lower()
+        daily_tokens = {"d", "1d", "day", "daily", "d1"}
+        if interval_str in daily_tokens:
+            log(f"[{STRATEGY_NAME}] [WARN] Daily interval detected; scheduling single daily open/close ticks.")
+            start_hour, start_min = self.cfg.session_windows[0][0], self.cfg.session_windows[0][1]
+            end_hour, end_min = self.cfg.session_windows[-1][2], self.cfg.session_windows[-1][3]
+            self.scheduler.add_job(self.on_bar_open,
+                                   CronTrigger(hour=start_hour, minute=start_min, second="1", timezone=IST))
+            self.scheduler.add_job(self.on_bar_close,
+                                   CronTrigger(hour=end_hour, minute=end_min, second="55", timezone=IST))
+            interval_label = "daily"
+        else:
+            iv = self._parse_interval_minutes(self.cfg.interval)
+            self.scheduler.add_job(self.on_bar_close,
+                                   CronTrigger(minute=f"*/{iv}", second="55", timezone=IST))
+            self.scheduler.add_job(self.on_bar_open,
+                                   CronTrigger(minute=f"*/{iv}", second="1", timezone=IST))
+            interval_label = f"{iv}m"
 
         # EOD square-off
         if self.cfg.enable_eod_square_off:
             h, m = self.cfg.square_off_time
             self.scheduler.add_job(self.square_off, CronTrigger(hour=h, minute=m, second="0", timezone=IST))
 
+        # OCO safety polling
+        self.scheduler.add_job(self.check_order_status, 'interval', seconds=5, max_instances=1)
+
         # Graceful shutdown
         signal.signal(signal.SIGINT, self._graceful_exit)
         signal.signal(signal.SIGTERM, self._graceful_exit)
 
         self.scheduler.start()
-        log(f"[{STRATEGY_NAME}] Scheduler started @ interval={iv}m")
+        log(f"[{STRATEGY_NAME}] Scheduler started @ interval={interval_label}")
 
         # Idle loop to keep process alive
         try:
@@ -583,8 +629,11 @@ class ScalpWithTrendBot:
 
 def main():
     cfg = Config()
-    bot = ScalpWithTrendBot(cfg)
+    bot = RandomScalpBot(cfg)
     bot.start()
 
 if __name__ == "__main__":
     main()
+
+# Maintain compatibility with discovery expectations
+ScalpWithTrendBot = RandomScalpBot
