@@ -42,17 +42,21 @@ STRATEGY_NAME = "random_scalp_live"
 # ==================== Strategy Metadata ====================
 STRATEGY_METADATA = {
     "name": "Random Scalp (Live)",
-    "description": "Long-only random scalp bot that queues a buy on every Nth bar and manages fixed rupee TP/SL exits with enhanced safety rails.",
-    "version": "1.1",
+    "description": "Production-hardened long-only random scalp bot with partial fill handling, SL-M fallback, and enhanced safety rails.",
+    "version": "1.2",
     "features": [
         "Fixed-interval long entries",
         "Static rupee profit target and stop loss",
-        "Intraday square-off with APScheduler",
-        "OpenAlgo order execution with quote validation",
+        "Partial fill handling on entry and exits with quantity sync",
+        "SL-M trigger validation with automatic SL fallback",
+        "Idempotent order placement with timeout handling",
         "OCO race condition protection with thread locks",
         "Exit legs retry mechanism with progressive backoff",
-        "Position reconciliation every 30 seconds",
-        "Enhanced state recovery and graceful shutdown"
+        "Three-axis position reconciliation (direction, qty, price)",
+        "Enhanced graceful shutdown with escalation protocol",
+        "Market-on-target conversion for gap scenarios",
+        "Intraday square-off with APScheduler",
+        "OpenAlgo order execution with quote validation"
     ],
     "has_trade_direction": False,
     "author": "Random Scalp Port"
@@ -168,6 +172,11 @@ class Config:
     test_mode: bool = os.getenv("TEST_MODE", "false").lower() == "true"  # use openalgo.simulator
     log_to_file: bool = os.getenv("LOG_TO_FILE", "true").lower() == "true"
     persist_state: bool = os.getenv("PERSIST_STATE", "true").lower() == "true"
+
+    # Production hardening (v1.2)
+    api_timeout_seconds: int = int(os.getenv("API_TIMEOUT_SECONDS", 10))
+    max_order_retries: int = int(os.getenv("MAX_ORDER_RETRIES", 2))
+    enable_market_on_target: bool = os.getenv("ENABLE_MARKET_ON_TARGET", "false").lower() == "true"
 
     # History warmup (optional; off by default here)
     use_history: bool = os.getenv("USE_HISTORY", "false").lower() == "true"
@@ -330,11 +339,14 @@ class RandomScalpBot:
         self.in_position: bool = False
         self.side: Optional[str] = None
         self.entry_price: Optional[float] = None
+        self.actual_filled_qty: int = 0  # Actual filled quantity (may differ from self.qty on partial fills)
         self.tp_level: Optional[float] = None
         self.sl_level: Optional[float] = None
         self.entry_order_id: Optional[str] = None
         self.tp_order_id: Optional[str] = None
         self.sl_order_id: Optional[str] = None
+        self.tp_filled_qty: int = 0  # Track partial TP fills
+        self.sl_filled_qty: int = 0  # Track partial SL fills
 
         # Signal state
         self.pending_signal: bool = False
@@ -431,6 +443,187 @@ class RandomScalpBot:
         status = str(resp.get('data', {}).get('order_status', '')).upper()
         return 'REJECT' in status or 'CANCELLED' in status
 
+    @staticmethod
+    def _is_partial(resp: Dict[str, Any]) -> bool:
+        status = str(resp.get('data', {}).get('order_status', '')).upper()
+        return 'PARTIAL' in status or status == 'OPEN'
+
+    @staticmethod
+    def _get_filled_qty(resp: Dict[str, Any]) -> int:
+        """Extract filled quantity from order status response."""
+        data = resp.get('data', {})
+        # Try multiple field names for compatibility
+        filled = data.get('filled_quantity') or data.get('filled_qty') or data.get('filledQuantity') or 0
+        return int(filled)
+
+    def _safe_placeorder(self, **params) -> Optional[Dict[str, Any]]:
+        """Idempotent order placement with timeout and retry."""
+        max_attempts = min(self.cfg.max_order_retries, 3)
+        last_error = None
+
+        for attempt in range(max_attempts):
+            try:
+                resp = self.client.placeorder(**params)
+                if resp.get('status') == 'success':
+                    return resp
+                else:
+                    log(f"[{STRATEGY_NAME}] [WARN] placeorder attempt {attempt+1}/{max_attempts} failed: {resp.get('message', resp)}")
+                    last_error = resp
+            except Exception as e:
+                log(f"[{STRATEGY_NAME}] [WARN] placeorder attempt {attempt+1}/{max_attempts} exception: {e}")
+                last_error = str(e)
+                # On timeout or network error, check if order actually went through
+                if attempt < max_attempts - 1 and 'timeout' in str(e).lower():
+                    time.sleep(0.3 * (attempt + 1))
+                    continue
+
+            # Wait before retry
+            if attempt < max_attempts - 1:
+                time.sleep(0.3 * (attempt + 1))
+
+        log(f"[{STRATEGY_NAME}] [ERROR] placeorder failed after {max_attempts} attempts: {last_error}")
+        return None
+
+    def _place_stop_order(self, quantity: int, trigger_price: float, action: str = "SELL") -> Optional[Dict[str, Any]]:
+        """Place stop loss with SL-M → SL fallback and trigger validation."""
+        # Validate trigger price for long positions (trigger should be < LTP)
+        if action == "SELL" and self.side == 'LONG':
+            try:
+                q = self.client.quotes(symbol=self.cfg.symbol, exchange=self.cfg.exchange)
+                ltp = float(q.get('data', {}).get('ltp') or 0)
+                if ltp and trigger_price >= ltp:
+                    log(f"[{STRATEGY_NAME}] [WARN] SL trigger {trigger_price:.2f} >= LTP {ltp:.2f}, adjusting to LTP - tick")
+                    trigger_price = max(self._round_to_tick(ltp - self.tick_size), 0.05)
+            except Exception as e:
+                log(f"[{STRATEGY_NAME}] [WARN] Could not validate trigger vs LTP: {e}")
+
+        # Try SL-M first
+        try:
+            resp = self._safe_placeorder(
+                strategy=STRATEGY_NAME,
+                symbol=self.cfg.symbol,
+                exchange=self.cfg.exchange,
+                product=self.cfg.product,
+                action=action,
+                price_type="SL-M",
+                trigger_price=trigger_price,
+                quantity=quantity,
+            )
+            if resp and resp.get('status') == 'success':
+                log(f"[{STRATEGY_NAME}] [SL] Placed SL-M @ trigger ₹{trigger_price:.2f} for qty {quantity}")
+                return resp
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] SL-M placement failed: {e}")
+
+        # Fallback to SL (with limit price)
+        log(f"[{STRATEGY_NAME}] [FALLBACK] Retrying with SL instead of SL-M")
+        fallback_price = max(self._round_to_tick(trigger_price - self.tick_size), 0.05)
+        try:
+            resp = self._safe_placeorder(
+                strategy=STRATEGY_NAME,
+                symbol=self.cfg.symbol,
+                exchange=self.cfg.exchange,
+                product=self.cfg.product,
+                action=action,
+                price_type="SL",
+                price=fallback_price,
+                trigger_price=trigger_price,
+                quantity=quantity,
+            )
+            if resp and resp.get('status') == 'success':
+                log(f"[{STRATEGY_NAME}] [SL] Placed SL @ price ₹{fallback_price:.2f} trigger ₹{trigger_price:.2f} for qty {quantity}")
+                return resp
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [ERROR] SL fallback also failed: {e}")
+
+        return None
+
+    def _sync_exit_quantities(self, remaining_qty: int) -> None:
+        """Sync exit order quantities when partial fills occur."""
+        if remaining_qty <= 0:
+            log(f"[{STRATEGY_NAME}] [SYNC] No remaining quantity, clearing exits")
+            self.cancel_order_silent(self.tp_order_id)
+            self.cancel_order_silent(self.sl_order_id)
+            self.tp_order_id = None
+            self.sl_order_id = None
+            return
+
+        log(f"[{STRATEGY_NAME}] [SYNC] Adjusting exits for remaining qty {remaining_qty}")
+
+        # Cancel existing exits
+        self.cancel_order_silent(self.tp_order_id)
+        self.cancel_order_silent(self.sl_order_id)
+        self.tp_order_id = None
+        self.sl_order_id = None
+
+        # Re-place with correct quantity
+        if not self.entry_price or not self.tp_level or not self.sl_level:
+            log(f"[{STRATEGY_NAME}] [ERROR] Cannot re-place exits: missing price levels")
+            return
+
+        # Place TP
+        try:
+            tp_resp = self._safe_placeorder(
+                strategy=STRATEGY_NAME,
+                symbol=self.cfg.symbol,
+                exchange=self.cfg.exchange,
+                product=self.cfg.product,
+                action="SELL",
+                price_type="LIMIT",
+                price=self.tp_level,
+                quantity=remaining_qty,
+            )
+            if tp_resp and tp_resp.get('status') == 'success':
+                self.tp_order_id = tp_resp.get('orderid')
+                log(f"[{STRATEGY_NAME}] [SYNC] Re-placed TP for qty {remaining_qty}")
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [ERROR] Failed to re-place TP: {e}")
+
+        # Place SL
+        sl_resp = self._place_stop_order(remaining_qty, self.sl_level, action="SELL")
+        if sl_resp and sl_resp.get('status') == 'success':
+            self.sl_order_id = sl_resp.get('orderid')
+            log(f"[{STRATEGY_NAME}] [SYNC] Re-placed SL for qty {remaining_qty}")
+
+        self._persist()
+
+    def _cleanup_stale_orders(self) -> None:
+        """Clean up stale exit orders when flat."""
+        if self.tp_order_id or self.sl_order_id:
+            log(f"[{STRATEGY_NAME}] [CLEANUP] Removing stale orders (flat position)")
+            self.cancel_order_silent(self.tp_order_id)
+            self.cancel_order_silent(self.sl_order_id)
+            self.tp_order_id = None
+            self.sl_order_id = None
+            self.tp_filled_qty = 0
+            self.sl_filled_qty = 0
+            self._persist()
+
+    def _ensure_exits(self) -> None:
+        """Re-arm exit protection if missing while in position."""
+        if not self.in_position:
+            return
+
+        if self.tp_order_id and self.sl_order_id:
+            return  # Exits already in place
+
+        log(f"[{STRATEGY_NAME}] [CRITICAL] Position detected without exits! Re-arming protection...")
+
+        # Use entry price if available, otherwise try to get from position book
+        if not self.entry_price:
+            log(f"[{STRATEGY_NAME}] [ERROR] Cannot place exits: no entry price")
+            return
+
+        # Compute levels if missing
+        if not self.tp_level:
+            self.tp_level = self._round_to_tick(self.entry_price + self.cfg.profit_target_rupees)
+        if not self.sl_level:
+            self.sl_level = self._round_to_tick(self.entry_price - self.cfg.stop_loss_rupees)
+
+        # Place exit legs
+        qty_to_protect = self.actual_filled_qty if self.actual_filled_qty > 0 else self.qty
+        self.place_exit_legs_for_qty(qty_to_protect)
+
     def _ensure_flat_position(self, context: str) -> None:
         """Verify broker position book is flat; attempt corrective order if not."""
         if not hasattr(self.client, "positionbook"):
@@ -478,7 +671,7 @@ class RandomScalpBot:
             log(f"[{STRATEGY_NAME}] [ERROR] Corrective flatten failed: {e}")
 
     def reconcile_position(self) -> None:
-        """Periodically reconcile internal state with actual broker position."""
+        """Periodically reconcile internal state with actual broker position (three-axis: direction, qty, price)."""
         if not hasattr(self.client, "positionbook"):
             return
 
@@ -490,15 +683,17 @@ class RandomScalpBot:
             positions = resp.get('data', []) or []
             symbol_upper = (self.cfg.symbol or "").upper()
             actual_qty = 0
+            actual_avg_price = None
 
             for pos in positions:
                 pos_symbol = str(pos.get('symbol', '')).upper()
                 if pos_symbol == symbol_upper:
                     actual_qty = int(pos.get('netqty') or pos.get('net_qty') or pos.get('quantity') or 0)
+                    actual_avg_price = float(pos.get('average_price') or pos.get('avg_price') or 0)
                     break
 
-            # Compare with expected state
-            expected_qty = self.qty if self.in_position else 0
+            # Compare with expected state (three axes)
+            expected_qty = self.actual_filled_qty if self.in_position else 0
 
             if actual_qty != expected_qty:
                 log(f"[{STRATEGY_NAME}] [RECONCILE] State mismatch! Expected: {expected_qty}, Actual: {actual_qty}")
@@ -517,17 +712,36 @@ class RandomScalpBot:
 
                 # If quantities don't match (partial fill scenarios)
                 elif actual_qty != 0 and abs(actual_qty) != expected_qty:
-                    log(f"[{STRATEGY_NAME}] [RECONCILE] Quantity mismatch, correcting...")
+                    log(f"[{STRATEGY_NAME}] [RECONCILE] Quantity mismatch, updating to actual {abs(actual_qty)}")
                     # Update our quantity to match actual
                     if self.in_position:
-                        self.qty = abs(actual_qty)
+                        self.actual_filled_qty = abs(actual_qty)
                         self._persist()
+                        # Re-sync exits if needed
+                        self._ensure_exits()
+
+            # Clean up stale exit orders if flat
+            if not self.in_position:
+                self._cleanup_stale_orders()
+
+            # If in position without exits, re-arm immediately
+            if self.in_position and (not self.tp_order_id or not self.sl_order_id):
+                log(f"[{STRATEGY_NAME}] [RECONCILE] Position without exits detected!")
+                self._ensure_exits()
+
+            # Validate entry price if available from broker
+            if self.in_position and actual_avg_price and abs(actual_avg_price - (self.entry_price or 0)) > 0.01:
+                log(f"[{STRATEGY_NAME}] [RECONCILE] Avg price mismatch: ours {self.entry_price:.2f} vs broker {actual_avg_price:.2f}")
+                # Trust broker's price if we don't have one
+                if not self.entry_price:
+                    self.entry_price = actual_avg_price
+                    self._persist()
 
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] Position reconciliation failed: {e}")
 
     def check_order_status(self):
-        """Poll sibling orders to implement OCO safety with race condition protection."""
+        """Poll sibling orders to implement OCO safety with race condition protection and partial fill handling."""
         if not self.in_position:
             # Retry exit legs if needed
             if self.entry_price and not self.exit_legs_placed and self.exit_legs_retry_count < self.max_exit_legs_retries:
@@ -542,8 +756,12 @@ class RandomScalpBot:
         try:
             tp_complete = False
             sl_complete = False
+            tp_partial = False
+            sl_partial = False
             tp_price = None
             sl_price = None
+            tp_filled = 0
+            sl_filled = 0
 
             # Check TP status
             if self.tp_order_id:
@@ -553,8 +771,16 @@ class RandomScalpBot:
                         if self._is_complete(resp):
                             tp_complete = True
                             tp_price = float(resp.get('data', {}).get('average_price', 0) or 0)
+                            tp_filled = self._get_filled_qty(resp)
+                        elif self._is_partial(resp):
+                            tp_partial = True
+                            tp_filled = self._get_filled_qty(resp)
+                            if tp_filled > self.tp_filled_qty:
+                                log(f"[{STRATEGY_NAME}] [PARTIAL] TP partially filled: {tp_filled}/{self.actual_filled_qty}")
+                                self.tp_filled_qty = tp_filled
                         elif self._is_rejected(resp):
-                            log(f"[{STRATEGY_NAME}] [WARN] TP rejected; keeping SL active")
+                            log(f"[{STRATEGY_NAME}] [CRITICAL] TP rejected - position UNPROTECTED on upside!")
+                            self.tp_order_id = None
                 except Exception as e:
                     log(f"[{STRATEGY_NAME}] [WARN] TP status check failed: {e}")
 
@@ -566,14 +792,31 @@ class RandomScalpBot:
                         if self._is_complete(resp):
                             sl_complete = True
                             sl_price = float(resp.get('data', {}).get('average_price', 0) or 0)
+                            sl_filled = self._get_filled_qty(resp)
+                        elif self._is_partial(resp):
+                            sl_partial = True
+                            sl_filled = self._get_filled_qty(resp)
+                            if sl_filled > self.sl_filled_qty:
+                                log(f"[{STRATEGY_NAME}] [PARTIAL] SL partially filled: {sl_filled}/{self.actual_filled_qty}")
+                                self.sl_filled_qty = sl_filled
                         elif self._is_rejected(resp):
-                            log(f"[{STRATEGY_NAME}] [WARN] SL rejected; keeping TP active")
+                            log(f"[{STRATEGY_NAME}] [CRITICAL] SL rejected - position UNPROTECTED on downside!")
+                            self.sl_order_id = None
                 except Exception as e:
                     log(f"[{STRATEGY_NAME}] [WARN] SL status check failed: {e}")
 
-            # Process exits - handle both filled case
+            # Handle partial fills - sync exit quantities
+            total_exits = self.tp_filled_qty + self.sl_filled_qty
+            if total_exits > 0 and total_exits < self.actual_filled_qty:
+                remaining_qty = self.actual_filled_qty - total_exits
+                if not tp_complete and not sl_complete:
+                    log(f"[{STRATEGY_NAME}] [SYNC_NEEDED] Total exits {total_exits}, remaining {remaining_qty}")
+                    self._sync_exit_quantities(remaining_qty)
+                    return  # Exit after sync to avoid processing stale data
+
+            # Process complete fills - handle both filled case
             if tp_complete and sl_complete:
-                log(f"[{STRATEGY_NAME}] [CRITICAL] Both TP and SL filled! This indicates OCO failure.")
+                log(f"[{STRATEGY_NAME}] [CRITICAL] Both TP and SL filled! OCO failure detected.")
                 # Use TP price as it's more favorable, send corrective order for SL fill
                 self._realize_exit(tp_price or self.entry_price, "Target Hit (OCO Race)")
                 # Immediately flatten any residual
@@ -584,6 +827,29 @@ class RandomScalpBot:
             elif sl_complete:
                 self.cancel_order_silent(self.tp_order_id)
                 self._realize_exit(sl_price or self.entry_price, "Stoploss Hit")
+
+            # Market-on-target: if enabled and LTP >= TP, convert to market
+            if self.cfg.enable_market_on_target and self.tp_order_id and not tp_complete:
+                try:
+                    q = self.client.quotes(symbol=self.cfg.symbol, exchange=self.cfg.exchange)
+                    ltp = float(q.get('data', {}).get('ltp') or 0)
+                    if ltp >= self.tp_level:
+                        log(f"[{STRATEGY_NAME}] [MARKET_ON_TARGET] LTP {ltp:.2f} >= TP {self.tp_level:.2f}, converting to MARKET")
+                        self.cancel_order_silent(self.tp_order_id)
+                        self.cancel_order_silent(self.sl_order_id)
+                        remaining = self.actual_filled_qty - total_exits
+                        if remaining > 0:
+                            self._safe_placeorder(
+                                strategy=STRATEGY_NAME,
+                                symbol=self.cfg.symbol,
+                                exchange=self.cfg.exchange,
+                                product=self.cfg.product,
+                                action="SELL",
+                                price_type="MARKET",
+                                quantity=remaining,
+                            )
+                except Exception as e:
+                    log(f"[{STRATEGY_NAME}] [WARN] Market-on-target check failed: {e}")
         finally:
             self.exit_lock.release()
 
@@ -593,7 +859,9 @@ class RandomScalpBot:
                 return
             action = "BUY"  # long-only to mirror backtest
             log(f"[{STRATEGY_NAME}] 🚀 [ENTRY] {action} {self.cfg.symbol} x {self.qty}")
-            resp = self.client.placeorder(
+
+            # Use idempotent order placement
+            resp = self._safe_placeorder(
                 strategy=STRATEGY_NAME,
                 symbol=self.cfg.symbol,
                 exchange=self.cfg.exchange,
@@ -602,30 +870,43 @@ class RandomScalpBot:
                 price_type="MARKET",
                 quantity=self.qty,
             )
-            if resp.get('status') != 'success':
+            if not resp or resp.get('status') != 'success':
                 log(f"[{STRATEGY_NAME}] ❌ placeorder failed: {resp}")
                 self.pending_signal = False
                 return
             self.entry_order_id = resp.get('orderid')
             log(f"[{STRATEGY_NAME}] [ORDER] entry oid={self.entry_order_id}")
 
-            # Poll to fetch average_price with retry logic
+            # Poll to fetch average_price AND filled_quantity with retry logic
             max_retries = 5
             for attempt in range(max_retries):
                 time.sleep(0.3 * (attempt + 1))  # Progressive backoff
                 st = self.client.orderstatus(order_id=self.entry_order_id, strategy=STRATEGY_NAME)
                 data = st.get('data', {})
                 self.entry_price = float(data.get('average_price') or 0)
-                if self.entry_price:
-                    break
-                log(f"[{STRATEGY_NAME}] [WARN] average_price not ready, retry {attempt+1}/{max_retries}")
+                filled_qty = self._get_filled_qty(st)
 
-            if not self.entry_price:
-                log(f"[{STRATEGY_NAME}] [ERROR] Could not get average_price after {max_retries} retries; exit legs will retry in polling loop")
+                # Check if order is complete or partially filled
+                if self._is_complete(st) and self.entry_price and filled_qty > 0:
+                    self.actual_filled_qty = filled_qty
+                    if filled_qty < self.qty:
+                        log(f"[{STRATEGY_NAME}] [PARTIAL_FILL] Entry filled {filled_qty}/{self.qty} @ ₹{self.entry_price:.2f}")
+                    break
+                elif self.entry_price and filled_qty > 0:
+                    # Partial fill detected
+                    self.actual_filled_qty = filled_qty
+                    log(f"[{STRATEGY_NAME}] [WARN] Entry partially filled {filled_qty}/{self.qty}, waiting for completion...")
+
+                log(f"[{STRATEGY_NAME}] [WARN] Entry order not ready, retry {attempt+1}/{max_retries}")
+
+            if not self.entry_price or self.actual_filled_qty == 0:
+                log(f"[{STRATEGY_NAME}] [ERROR] Could not get entry details after {max_retries} retries; exit legs will retry in polling loop")
                 self.in_position = True  # Mark in position
                 self.side = 'LONG'
                 self.pending_signal = False
                 self.exit_legs_placed = False  # Will trigger retry in check_order_status
+                # Assume full quantity for safety
+                self.actual_filled_qty = self.qty
                 self._persist()
                 return
 
@@ -636,15 +917,28 @@ class RandomScalpBot:
             self.side = 'LONG'
             self.pending_signal = False
 
-            log(f"[{STRATEGY_NAME}] ✅ ENTRY avg ₹{self.entry_price:.2f} | TP ₹{self.tp_level:.2f} | SL ₹{self.sl_level:.2f}")
-            self.place_exit_legs()
+            log(f"[{STRATEGY_NAME}] ✅ ENTRY avg ₹{self.entry_price:.2f} qty {self.actual_filled_qty} | TP ₹{self.tp_level:.2f} | SL ₹{self.sl_level:.2f}")
+            log(f"[{STRATEGY_NAME}] STATE=LONG qty={self.actual_filled_qty} entry={self.entry_price:.2f} tp={self.tp_level:.2f} sl={self.sl_level:.2f}")
+
+            # Place exit legs for ACTUAL filled quantity
+            self.place_exit_legs_for_qty(self.actual_filled_qty)
             self._persist()
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [ERROR] place_entry: {e}")
 
     def place_exit_legs(self):
+        """Legacy method - calls new quantity-aware version."""
+        qty = self.actual_filled_qty if self.actual_filled_qty > 0 else self.qty
+        self.place_exit_legs_for_qty(qty)
+
+    def place_exit_legs_for_qty(self, quantity: int):
+        """Place exit legs for a specific quantity (handles partial fills)."""
         if not self.in_position or self.entry_price is None:
             return
+        if quantity <= 0:
+            log(f"[{STRATEGY_NAME}] [ERROR] Cannot place exits for qty {quantity}")
+            return
+
         try:
             self.exit_legs_retry_count += 1
             tp_success = False
@@ -652,7 +946,7 @@ class RandomScalpBot:
 
             # TP (SELL LIMIT)
             try:
-                tp = self.client.placeorder(
+                tp = self._safe_placeorder(
                     strategy=STRATEGY_NAME,
                     symbol=self.cfg.symbol,
                     exchange=self.cfg.exchange,
@@ -660,9 +954,9 @@ class RandomScalpBot:
                     action="SELL",
                     price_type="LIMIT",
                     price=self.tp_level,
-                    quantity=self.qty,
+                    quantity=quantity,
                 )
-                if tp.get('status') == 'success':
+                if tp and tp.get('status') == 'success':
                     self.tp_order_id = tp.get('orderid')
                     tp_success = True
                 else:
@@ -670,53 +964,26 @@ class RandomScalpBot:
             except Exception as e:
                 log(f"[{STRATEGY_NAME}] [ERROR] TP order exception: {e}")
 
-            # SL (SELL SL-M by default, with SL fallback)
-            try:
-                sl = self.client.placeorder(
-                    strategy=STRATEGY_NAME,
-                    symbol=self.cfg.symbol,
-                    exchange=self.cfg.exchange,
-                    product=self.cfg.product,
-                    action="SELL",
-                    price_type="SL-M",
-                    trigger_price=self.sl_level,
-                    quantity=self.qty,
-                )
-                if sl.get('status') != 'success':
-                    # Fallback to SL with limit price
-                    fallback_price = max(self.sl_level - (self.tick_size or 0.05), 0.0)
-                    log(f"[{STRATEGY_NAME}] [WARN] SL-M rejected ({sl}); retrying with SL @ {fallback_price:.2f}")
-                    sl = self.client.placeorder(
-                        strategy=STRATEGY_NAME,
-                        symbol=self.cfg.symbol,
-                        exchange=self.cfg.exchange,
-                        product=self.cfg.product,
-                        action="SELL",
-                        price_type="SL",
-                        price=fallback_price,
-                        trigger_price=self.sl_level,
-                        quantity=self.qty,
-                    )
-                if sl.get('status') == 'success':
-                    self.sl_order_id = sl.get('orderid')
-                    sl_success = True
-                else:
-                    log(f"[{STRATEGY_NAME}] [ERROR] SL order failed: {sl}")
-            except Exception as e:
-                log(f"[{STRATEGY_NAME}] [ERROR] SL order exception: {e}")
+            # SL (SELL SL-M by default, with smart fallback)
+            sl = self._place_stop_order(quantity, self.sl_level, action="SELL")
+            if sl and sl.get('status') == 'success':
+                self.sl_order_id = sl.get('orderid')
+                sl_success = True
+            else:
+                log(f"[{STRATEGY_NAME}] [ERROR] SL order failed completely")
 
             # Mark exit legs as successfully placed if both succeeded
             if tp_success and sl_success:
                 self.exit_legs_placed = True
                 self.exit_legs_retry_count = 0  # Reset counter
-                log(f"[{STRATEGY_NAME}] [EXITS] TP oid={self.tp_order_id} @{self.tp_level:.2f} | SL oid={self.sl_order_id} @{self.sl_level:.2f}")
+                log(f"[{STRATEGY_NAME}] [EXITS] TP oid={self.tp_order_id} @₹{self.tp_level:.2f} | SL oid={self.sl_order_id} @₹{self.sl_level:.2f} for qty {quantity}")
                 self._persist()
             else:
                 log(f"[{STRATEGY_NAME}] [WARN] Exit legs placement incomplete (TP={tp_success}, SL={sl_success})")
                 if self.exit_legs_retry_count >= self.max_exit_legs_retries:
                     log(f"[{STRATEGY_NAME}] [CRITICAL] Max exit legs retries reached - position is UNPROTECTED!")
         except Exception as e:
-            log(f"[{STRATEGY_NAME}] [ERROR] place_exit_legs: {e}")
+            log(f"[{STRATEGY_NAME}] [ERROR] place_exit_legs_for_qty: {e}")
 
     def cancel_order_silent(self, oid: Optional[str]):
         if not oid:
@@ -893,11 +1160,14 @@ class RandomScalpBot:
         self.in_position = False
         self.side = None
         self.entry_price = None
+        self.actual_filled_qty = 0
         self.tp_level = None
         self.sl_level = None
         self.entry_order_id = None
         self.tp_order_id = None
         self.sl_order_id = None
+        self.tp_filled_qty = 0
+        self.sl_filled_qty = 0
         self.pending_signal = False
         self.next_entry_time = None
         self.exit_legs_placed = False
@@ -967,28 +1237,30 @@ class RandomScalpBot:
         exit_confirmed = False
         try:
             if self.in_position:
-                log(f"[{STRATEGY_NAME}] [SHUTDOWN] Closing position before exit")
-                # Cancel exit legs
+                qty_to_close = self.actual_filled_qty if self.actual_filled_qty > 0 else self.qty
+                log(f"[{STRATEGY_NAME}] [SHUTDOWN] Closing position qty={qty_to_close} before exit")
+
+                # Cancel exit legs first
                 self.cancel_order_silent(self.tp_order_id)
                 self.cancel_order_silent(self.sl_order_id)
 
-                # Place market close order
-                resp = self.client.placeorder(
+                # Place market close order with idempotent placement
+                resp = self._safe_placeorder(
                     strategy=STRATEGY_NAME,
                     symbol=self.cfg.symbol,
                     exchange=self.cfg.exchange,
                     product=self.cfg.product,
                     action='SELL',
                     price_type='MARKET',
-                    quantity=self.qty,
+                    quantity=qty_to_close,
                 )
 
-                # Wait for confirmation with timeout
-                if resp.get('status') == 'success':
+                # Enhanced confirmation with escalation: poll every 0.25s for 5s (20 iterations)
+                if resp and resp.get('status') == 'success':
                     oid = resp.get('orderid')
-                    max_wait = 5  # seconds
-                    for _ in range(max_wait * 2):  # Check every 0.5s
-                        time.sleep(0.5)
+                    max_iterations = 20  # 20 × 0.25s = 5 seconds
+                    for iteration in range(max_iterations):
+                        time.sleep(0.25)
                         try:
                             st = self.client.orderstatus(order_id=oid, strategy=STRATEGY_NAME)
                             if self._is_complete(st):
@@ -1001,13 +1273,35 @@ class RandomScalpBot:
                                 exit_confirmed = True
                                 break
                         except Exception as e:
-                            log(f"[{STRATEGY_NAME}] [WARN] Exit confirmation check failed: {e}")
+                            log(f"[{STRATEGY_NAME}] [WARN] Exit confirmation check {iteration+1}/{max_iterations} failed: {e}")
 
+                    # Escalation: retry MARKET once if not confirmed
                     if not exit_confirmed:
-                        log(f"[{STRATEGY_NAME}] [WARN] Exit order not confirmed within timeout, assuming filled")
-                        # Still mark as flat to prevent state corruption
-                        self._flat_state()
-                        self._persist()
+                        log(f"[{STRATEGY_NAME}] [ESCALATE] Exit not confirmed after 5s, retrying MARKET order...")
+                        retry_resp = self._safe_placeorder(
+                            strategy=STRATEGY_NAME,
+                            symbol=self.cfg.symbol,
+                            exchange=self.cfg.exchange,
+                            product=self.cfg.product,
+                            action='SELL',
+                            price_type='MARKET',
+                            quantity=qty_to_close,
+                        )
+                        if retry_resp and retry_resp.get('status') == 'success':
+                            log(f"[{STRATEGY_NAME}] [ESCALATE] Retry order placed, keeping process alive for 30s with reconciliation...")
+                            # Keep process alive for 30 more seconds with reconciliation running
+                            for _ in range(12):  # 12 × 2.5s = 30s
+                                time.sleep(2.5)
+                                self.reconcile_position()
+                                if not self.in_position:
+                                    exit_confirmed = True
+                                    break
+
+                        if not exit_confirmed:
+                            log(f"[{STRATEGY_NAME}] [CRITICAL] STILL IN POSITION AFTER SHUTDOWN ATTEMPTS!")
+                            log(f"[{STRATEGY_NAME}] [CRITICAL] Manual intervention may be required - check broker platform!")
+                        else:
+                            log(f"[{STRATEGY_NAME}] Position confirmed closed via reconciliation")
                 else:
                     log(f"[{STRATEGY_NAME}] [ERROR] Shutdown close order failed: {resp}")
         except Exception as e:

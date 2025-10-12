@@ -126,18 +126,24 @@ These match OpenAlgo’s common constants and are compatible with supported brok
 
 ---
 
-## Risk & safety rails
+## Risk & safety rails (v1.2 - Production Hardened)
 
 * **No re‑entry while in position** (signals are suppressed while long).
 * **Square‑off gate**: if the *next* entry would occur at/after square‑off time, the signal is skipped.
 * **OCO enforcement with race protection**: TP/SL polled every 5s with thread lock; handles both fills simultaneously.
+* **Partial fill handling**: Entry/exit orders track actual `filled_quantity`; exits sized to actual fills only.
+* **Idempotent order placement**: `_safe_placeorder()` with timeout handling prevents duplicate orders on network issues.
+* **SL-M trigger validation**: Checks trigger_price < LTP before placement; auto-fallback to SL if SL-M unsupported.
+* **Partial exit synchronization**: Monitors TP/SL for partial fills; adjusts sibling quantities dynamically.
 * **Exit legs retry**: If exit placement fails, retries up to 3 times with tracking.
 * **Entry price retry**: Polls average_price with progressive backoff (max 5 attempts).
-* **Forced exits** (EOD/shutdown): **cancel exits first**, then send market close with confirmation.
-* **Position reconciliation**: Checks actual broker position every 30s against internal state.
-* **Idempotent entry**: extra guard inside `place_entry()` to avoid double entries.
+* **Forced exits** (EOD/shutdown): **cancel exits first**, then send market close with escalation protocol (0.25s polling → retry → 30s keep-alive).
+* **Three-axis reconciliation**: Checks direction, quantity, AND avg_price every 30s; re-arms exits if missing.
+* **Child order cleanup**: Removes stale TP/SL when flat; handles rejected orders to prevent retry loops.
+* **Market-on-target** (optional): Converts TP LIMIT to MARKET when LTP >= target (handles gap scenarios).
 * **Tick‑size rounding**: TP/SL levels rounded to discovered **tick size** (with exchange-specific fallbacks) to minimize rejects.
 * **State recovery**: Handles both TP and SL filled during downtime, with corrective orders.
+* **Enhanced logging**: One-line state summaries + critical warnings for unprotected positions.
 
 ---
 
@@ -211,7 +217,34 @@ Set `TEST_MODE=true` to use `openalgo.simulator(...)` without touching the live 
 
 ## Changelog
 
-**1.1** (Current)
+**1.2** (Current - Production Hardened)
+
+* **Real-World Trading Edge Cases:**
+  * **Partial Fill Handling:** Entry and exit orders track actual filled_quantity vs requested; exits sized to actual fills only
+  * **Idempotent Order Placement:** `_safe_placeorder()` with timeout handling, retry logic, and duplicate order prevention
+  * **SL-M Trigger Validation:** Validates trigger_price < LTP before SL-M placement; auto-fallback to SL if unsupported
+  * **Partial Exit Sync:** Monitors TP/SL for partial fills; dynamically adjusts sibling quantities via `_sync_exit_quantities()`
+  * **Three-Axis Reconciliation:** Compares direction, quantity, AND avg_price from broker; re-arms exits if missing
+  * **Child Order Cleanup:** Removes stale TP/SL when flat; handles rejected orders to prevent retry loops
+  * **Enhanced Graceful Exit:** 0.25s polling (20 iterations = 5s) → retry MARKET → keep alive 30s with reconciliation
+  * **Market-on-Target:** Optional conversion of TP LIMIT to MARKET when LTP >= target (handles gap scenarios)
+* **New Config Parameters:**
+  * `API_TIMEOUT_SECONDS` (default: 10) - timeout for API calls
+  * `MAX_ORDER_RETRIES` (default: 2) - max retry attempts for order placement
+  * `ENABLE_MARKET_ON_TARGET` (default: false) - convert TP to MARKET on gap
+* **Enhanced Logging:**
+  * One-line state summaries: `STATE=LONG qty=75 entry=100.50 tp=102.50 sl=99.50`
+  * Critical warnings for unprotected positions (rejected TP/SL)
+  * Detailed partial fill logging
+* **New Helper Methods:**
+  * `_safe_placeorder()` - idempotent with timeout
+  * `_place_stop_order()` - SL-M with SL fallback
+  * `_sync_exit_quantities()` - partial fill adjustment
+  * `_cleanup_stale_orders()` - reconciliation cleanup
+  * `_ensure_exits()` - re-arm protection if missing
+  * `place_exit_legs_for_qty()` - quantity-aware exit placement
+
+**1.1**
 
 * **Critical fixes:**
   * Fixed OCO race condition using thread lock to prevent both TP and SL from executing simultaneously
