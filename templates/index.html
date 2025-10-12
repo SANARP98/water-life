@@ -726,6 +726,13 @@
             display: flex;
             gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .logs-controls .btn {
+            white-space: nowrap;
+            min-width: auto;
+        }
         }
 
         .log-filter {
@@ -736,6 +743,7 @@
             background: var(--lighter);
             color: var(--dark);
             transition: var(--transition-fast);
+            min-width: 200px;
         }
 
         .log-filter:focus {
@@ -1029,6 +1037,145 @@
             margin-left: 6px;
         }
 
+        /* Config Display Panel */
+        .config-display {
+            position: fixed;
+            top: 400px;
+            right: 20px;
+            background: var(--lighter);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 100;
+            transition: var(--transition);
+            max-width: 320px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .config-display:hover {
+            box-shadow: var(--shadow-xl);
+            transform: translateY(-2px);
+        }
+
+        .config-display-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--gray-200);
+        }
+
+        .config-display-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .config-display-toggle {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--gray-500);
+            font-size: 18px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: var(--transition-fast);
+        }
+
+        .config-display-toggle:hover {
+            background: var(--gray-200);
+            color: var(--primary);
+        }
+
+        .config-display-content {
+            display: grid;
+            gap: 6px;
+            transition: var(--transition);
+            overflow: hidden;
+        }
+
+        .config-display-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+            margin: 0;
+        }
+
+        .config-display::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .config-display::-webkit-scrollbar-track {
+            background: var(--gray-100);
+            border-radius: 10px;
+        }
+
+        .config-display::-webkit-scrollbar-thumb {
+            background: var(--gray-400);
+            border-radius: 10px;
+        }
+
+        .config-display::-webkit-scrollbar-thumb:hover {
+            background: var(--gray-500);
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            font-size: 11px;
+            gap: 12px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            transition: var(--transition-fast);
+        }
+
+        .config-item:hover {
+            background: var(--gray-100);
+            border-color: var(--primary);
+        }
+
+        .config-item-label {
+            font-weight: 600;
+            color: var(--gray-700);
+            text-transform: capitalize;
+            min-width: 80px;
+            word-break: break-word;
+        }
+
+        .config-item-value {
+            color: var(--dark);
+            text-align: right;
+            font-family: 'SF Mono', monospace;
+            font-size: 11px;
+            background: var(--lighter);
+            padding: 3px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--gray-200);
+            max-width: 150px;
+            word-break: break-all;
+        }
+
+        .config-section-divider {
+            height: 1px;
+            background: var(--gray-300);
+            margin: 8px 0;
+        }
+
         /* Responsive Design */
         @media (max-width: 1200px) {
             .main-grid {
@@ -1066,6 +1213,16 @@
                 top: auto;
                 right: auto;
                 margin: 16px;
+                margin-bottom: 0;
+                max-width: 100%;
+            }
+
+            .config-display {
+                position: relative;
+                top: auto;
+                right: auto;
+                margin: 16px;
+                margin-top: 16px;
                 max-width: 100%;
             }
 
@@ -1087,10 +1244,14 @@
             }
 
             .logs-controls {
-                justify-content: space-between;
+                justify-content: flex-start;
                 flex-wrap: wrap;
             }
 
+            .log-filter {
+                min-width: 150px;
+                flex: 1;
+            }
             .btn {
                 padding: 10px 20px;
                 font-size: 13px;
@@ -1232,6 +1393,23 @@
         </div>
     </div>
 
+    <!-- Current Configuration Display -->
+    <div class="config-display">
+        <div class="config-display-header">
+            <div class="config-display-title">
+                <span>⚙️</span>
+                <span>Current Config</span>
+            </div>
+            <button class="config-display-toggle" onclick="toggleConfigDisplay()" title="Toggle config display">
+                <span id="configDisplayToggleIcon">−</span>
+            </button>
+        </div>
+        <div class="config-display-content" id="configDisplayContent">
+            <div style="text-align: center; color: var(--gray-500); font-size: 11px; padding: 12px;">
+                Loading configuration...
+            </div>
+        </div>
+    </div>
     <div class="container">
         <header>
             <h1>
@@ -1448,6 +1626,7 @@
         let autoScroll = true;
         let allLogs = [];
         let legendExpanded = true;
+        let configDisplayExpanded = true;
 
         // Detect OS and update keyboard shortcuts
         function detectOS() {
@@ -1504,10 +1683,115 @@
             }
         }
 
+        // Toggle config display
+        function toggleConfigDisplay() {
+            configDisplayExpanded = !configDisplayExpanded;
+            const content = document.getElementById('configDisplayContent');
+            const icon = document.getElementById('configDisplayToggleIcon');
+
+            if (configDisplayExpanded) {
+                content.classList.remove('collapsed');
+                icon.textContent = '−';
+            } else {
+                content.classList.add('collapsed');
+                icon.textContent = '+';
+            }
+
+            // Save preference to localStorage
+            try {
+                localStorage.setItem('configDisplayExpanded', configDisplayExpanded);
+            } catch (e) {
+                console.log('Could not save config display preference');
+            }
+        }
+
+        // Load config display preference
+        function loadConfigDisplayPreference() {
+            try {
+                const saved = localStorage.getItem('configDisplayExpanded');
+                if (saved !== null) {
+                    configDisplayExpanded = saved === 'true';
+                    if (!configDisplayExpanded) {
+                        document.getElementById('configDisplayContent').classList.add('collapsed');
+                        document.getElementById('configDisplayToggleIcon').textContent = '+';
+                    }
+                }
+            } catch (e) {
+                console.log('Could not load config display preference');
+            }
+        }
+
+        // Update config display
+        function updateConfigDisplay(config, strategyId) {
+            const content = document.getElementById('configDisplayContent');
+            const strategy = availableStrategies.find(s => s.id === strategyId);
+
+            if (!strategy || !config) {
+                content.innerHTML = '<div style="text-align: center; color: var(--gray-500); font-size: 11px; padding: 12px;">No configuration loaded</div>';
+                return;
+            }
+
+            const schema = strategy.config_schema || [];
+            const excludeGroups = ['CONNECTION', 'GENERAL'];
+
+            // Filter out excluded groups
+            const filteredSchema = schema.filter(field => {
+                const group = (field.group || 'General').toUpperCase();
+                return !excludeGroups.includes(group);
+            });
+
+            if (filteredSchema.length === 0) {
+                content.innerHTML = '<div style="text-align: center; color: var(--gray-500); font-size: 11px; padding: 12px;">No config to display</div>';
+                return;
+            }
+
+            let html = '';
+            let currentGroup = '';
+
+            filteredSchema.forEach(field => {
+                const group = field.group || 'General';
+                const value = config[field.name];
+
+                // Add group divider
+                if (group !== currentGroup && currentGroup !== '') {
+                    html += '<div class="config-section-divider"></div>';
+                }
+                currentGroup = group;
+
+                if (value !== undefined && value !== null && value !== '') {
+                    const label = field.label || field.name.replace(/_/g, ' ');
+                    let displayValue = value;
+
+                    // Format boolean values
+                    if (typeof value === 'boolean') {
+                        displayValue = value ? '✓ Yes' : '✗ No';
+                    }
+                    // Format numbers
+                    else if (typeof value === 'number') {
+                        displayValue = value.toFixed(field.type === 'number' && field.number_format === 'int' ? 0 : 2);
+                    }
+
+                    html += `
+                        <div class="config-item">
+                            <div class="config-item-label">${label}</div>
+                            <div class="config-item-value">${displayValue}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            if (html === '') {
+                html = '<div style="text-align: center; color: var(--gray-500); font-size: 11px; padding: 12px;">No values configured</div>';
+            }
+
+            content.innerHTML = html;
+        }
+
         socket.on('connect', async function() {
             console.log('Connected to server');
             detectOS();
             loadLegendPreference();
+            loadConfigDisplayPreference();
             await loadStrategies();
             await loadConfig();
         });
@@ -1577,6 +1861,9 @@
                 updateModeLabel();
 
                 renderStrategy(selectedStrategyId, currentConfigValues);
+
+                // Update config display
+                updateConfigDisplay(currentConfigValues, selectedStrategyId);
             } catch (error) {
                 console.error('Error loading config:', error);
             }
@@ -1845,6 +2132,8 @@
                 if (data.success) {
                     alert('✅ Configuration saved successfully!');
                     await loadConfig();
+                    // Update config display with new values
+                    updateConfigDisplay(currentConfigValues, selectedStrategyId);
                     closeConfigModal();
                 } else {
                     alert('❌ Error: ' + data.error);
