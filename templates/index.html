@@ -388,12 +388,9 @@
                 <div class="form-group">
                     <label>Strategy Selection</label>
                     <select id="strategySelect" onchange="onStrategyChange()">
-                        <option value="scalping">Scalping v1 (Original)</option>
-                        <option value="scalping2">Scalping v2 (Enhanced)</option>
-                        <option value="scalping2_claude">Scalping v2 Claude (Corrected)</option>
                     </select>
                     <small id="strategyDescription" style="display: block; margin-top: 5px; color: #666; font-size: 12px;">
-                        Original scalping strategy with hardcoded lot sizes
+                        Select a strategy to view its configuration.
                     </small>
                 </div>
 
@@ -408,129 +405,7 @@
                     </span>
                 </div>
 
-                <div class="form-group">
-                    <label>API Key</label>
-                    <input type="text" id="apiKey" placeholder="Your OpenAlgo API Key">
-                </div>
-
-                <div class="form-group">
-                    <label>API Host</label>
-                    <input type="text" id="apiHost" placeholder="https://api.openalgo.in">
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Symbol</label>
-                        <input type="text" id="symbol" list="symbolList" placeholder="Select or type symbol">
-                        <datalist id="symbolList">
-                            <option value="NIFTY">
-                            <option value="BANKNIFTY">
-                            <option value="FINNIFTY">
-                            <option value="MIDCPNIFTY">
-                            <option value="NIFTYNXT50">
-                            <option value="SENSEX">
-                            <option value="BANKEX">
-                            <option value="SENSEX50">
-                        </datalist>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Exchange</label>
-                        <select id="exchange">
-                            <option value="NSE_INDEX">NSE_INDEX</option>
-                            <option value="BSE_INDEX">BSE_INDEX</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Product</label>
-                        <select id="product">
-                            <option value="MIS">MIS (Intraday)</option>
-                            <option value="CNC">CNC</option>
-                            <option value="NRML">NRML</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Lots</label>
-                        <input type="number" id="lots" value="2" min="1">
-                    </div>
-                </div>
-
-                <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #667eea;">Indicators</h3>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>EMA Fast</label>
-                        <input type="number" id="emaFast" value="5" min="1">
-                    </div>
-
-                    <div class="form-group">
-                        <label>EMA Slow</label>
-                        <input type="number" id="emaSlow" value="20" min="1">
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>ATR Window</label>
-                        <input type="number" id="atrWindow" value="14" min="1">
-                    </div>
-
-                    <div class="form-group">
-                        <label>ATR Min Points</label>
-                        <input type="number" id="atrMinPoints" value="2.0" step="0.1">
-                    </div>
-                </div>
-
-                <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #667eea;">Risk Management</h3>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Target Points</label>
-                        <input type="number" id="targetPoints" value="10.0" step="0.5">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Stoploss Points</label>
-                        <input type="number" id="stoplossPoints" value="2.0" step="0.5">
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Daily Loss Cap (₹)</label>
-                    <input type="number" id="dailyLossCap" value="-1000" step="100">
-                </div>
-
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="confirmTrend" checked>
-                        <label style="margin-bottom: 0;">Confirm Trend at Entry</label>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="eodSquareOff" checked>
-                        <label style="margin-bottom: 0;">Enable EOD Square-off</label>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Square-off Time</label>
-                    <input type="text" id="squareOffTime" value="15:25" placeholder="HH:MM">
-                </div>
-
-                <div class="form-group" id="tradeDirectionGroup" style="display: none;">
-                    <label>Trade Direction</label>
-                    <select id="tradeDirection">
-                        <option value="both">Both (Long & Short)</option>
-                        <option value="long">Long Only</option>
-                        <option value="short">Short Only</option>
-                    </select>
-                </div>
+                <div id="dynamicConfig"></div>
 
                 <div style="margin-top: 25px;">
                     <button class="btn btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
@@ -608,16 +483,19 @@
         // WebSocket connection
         const socket = io();
 
+        const DEFAULT_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50', 'SENSEX', 'BANKEX', 'SENSEX50'];
+
         let isRunning = false;
         let availableStrategies = [];
         let currentStrategy = 'scalping';
-        let hasTradeDirection = false;
+        let selectedStrategyId = 'scalping';
+        let currentConfigValues = {};
+        let symbolOptions = [];
 
-        // Socket event handlers
-        socket.on('connect', function() {
+        socket.on('connect', async function() {
             console.log('Connected to server');
-            loadStrategies();
-            loadConfig();
+            await loadStrategies();
+            await loadConfig();
         });
 
         socket.on('log', function(data) {
@@ -628,131 +506,316 @@
             updateStatus(data);
         });
 
-        // Load available strategies
         async function loadStrategies() {
             try {
                 const response = await fetch('/api/strategies');
                 const data = await response.json();
-                availableStrategies = data.strategies;
-                currentStrategy = data.current;
+                availableStrategies = data.strategies || [];
+                currentStrategy = data.current || (availableStrategies[0]?.id || 'scalping');
+                selectedStrategyId = currentStrategy;
 
-                // Populate strategy dropdown
                 const select = document.getElementById('strategySelect');
                 select.innerHTML = '';
-                data.strategies.forEach(strategy => {
+                availableStrategies.forEach(strategy => {
                     const option = document.createElement('option');
                     option.value = strategy.id;
                     option.textContent = strategy.name;
-                    option.selected = strategy.id === currentStrategy;
+                    option.selected = strategy.id === selectedStrategyId;
                     select.appendChild(option);
                 });
-
-                onStrategyChange();
             } catch (error) {
                 console.error('Error loading strategies:', error);
             }
         }
 
-        // Handle strategy change
         function onStrategyChange() {
-            const selectedId = document.getElementById('strategySelect').value;
-            const strategy = availableStrategies.find(s => s.id === selectedId);
-
-            if (strategy) {
-                // Update description
-                document.getElementById('strategyDescription').textContent = strategy.description;
-
-                // Show/hide trade direction based on strategy
-                hasTradeDirection = strategy.has_trade_direction;
-                const tradeDirectionGroup = document.getElementById('tradeDirectionGroup');
-                tradeDirectionGroup.style.display = hasTradeDirection ? 'block' : 'none';
-
-                // Update strategy badge
-                document.getElementById('strategyBadge').textContent = strategy.name;
+            selectedStrategyId = document.getElementById('strategySelect').value;
+            const strategy = availableStrategies.find(s => s.id === selectedStrategyId);
+            if (!strategy) {
+                return;
             }
+
+            const fallbackSymbols = Object.keys(strategy.lot_sizes || {});
+            if (fallbackSymbols.length) {
+                symbolOptions = fallbackSymbols;
+            } else if (selectedStrategyId !== currentStrategy && !symbolOptions.length) {
+                symbolOptions = DEFAULT_SYMBOLS;
+            }
+
+            const values = selectedStrategyId === currentStrategy ? currentConfigValues : (strategy.default_config || {});
+            renderStrategy(selectedStrategyId, values);
         }
 
-        // Load configuration
         async function loadConfig() {
             try {
                 const response = await fetch('/api/config');
                 const data = await response.json();
 
-                document.getElementById('apiKey').value = data.config.api_key || '';
-                document.getElementById('apiHost').value = data.config.api_host;
-                document.getElementById('symbol').value = data.config.symbol;
-                document.getElementById('exchange').value = data.config.exchange;
-                document.getElementById('product').value = data.config.product;
-                document.getElementById('lots').value = data.config.lots;
-                document.getElementById('emaFast').value = data.config.ema_fast;
-                document.getElementById('emaSlow').value = data.config.ema_slow;
-                document.getElementById('atrWindow').value = data.config.atr_window;
-                document.getElementById('atrMinPoints').value = data.config.atr_min_points;
-                document.getElementById('targetPoints').value = data.config.target_points;
-                document.getElementById('stoplossPoints').value = data.config.stoploss_points;
-                document.getElementById('dailyLossCap').value = data.config.daily_loss_cap;
-                document.getElementById('confirmTrend').checked = data.config.confirm_trend_at_entry;
-                document.getElementById('eodSquareOff').checked = data.config.enable_eod_square_off;
-                document.getElementById('squareOffTime').value = data.config.square_off_time;
+                currentStrategy = data.selected_strategy || currentStrategy;
+                selectedStrategyId = currentStrategy;
+                currentConfigValues = data.config || {};
+                symbolOptions = data.available_symbols && data.available_symbols.length ? data.available_symbols : DEFAULT_SYMBOLS;
+
+                const select = document.getElementById('strategySelect');
+                select.value = selectedStrategyId;
 
                 document.getElementById('paperTradingToggle').checked = !data.is_paper_trading;
-
-                // Set strategy selection
-                if (data.selected_strategy) {
-                    document.getElementById('strategySelect').value = data.selected_strategy;
-                    currentStrategy = data.selected_strategy;
-                    onStrategyChange();
-                }
-
-                // Set trade direction if available
-                if (data.config.trade_direction) {
-                    document.getElementById('tradeDirection').value = data.config.trade_direction;
-                }
-
                 updateModeLabel();
+
+                renderStrategy(selectedStrategyId, currentConfigValues);
             } catch (error) {
                 console.error('Error loading config:', error);
             }
         }
 
-        // Save configuration
+        function renderStrategy(strategyId, valuesOverride) {
+            const strategy = availableStrategies.find(s => s.id === strategyId);
+            if (!strategy) {
+                return;
+            }
+
+            document.getElementById('strategyDescription').textContent = strategy.description || '';
+            document.getElementById('strategyBadge').textContent = strategy.name;
+
+            const schema = strategy.config_schema || [];
+            const defaults = strategy.default_config || {};
+            const mergedValues = Object.assign({}, defaults, valuesOverride || {});
+
+            const fallbackSymbols = Object.keys(strategy.lot_sizes || {});
+            if (!symbolOptions.length && fallbackSymbols.length) {
+                symbolOptions = fallbackSymbols;
+            }
+
+            buildConfigForm(schema, mergedValues);
+        }
+
+        function buildConfigForm(schema, values) {
+            const container = document.getElementById('dynamicConfig');
+            container.innerHTML = '';
+
+            if (!schema.length) {
+                const message = document.createElement('p');
+                message.style.color = '#666';
+                message.textContent = 'No editable configuration values exposed for this strategy.';
+                container.appendChild(message);
+                return;
+            }
+
+            let currentGroupName = '';
+            let groupWrapper = null;
+
+            schema.forEach(field => {
+                const groupName = field.group || 'General';
+                if (groupName !== currentGroupName) {
+                    currentGroupName = groupName;
+
+                    const heading = document.createElement('h3');
+                    heading.textContent = groupName;
+                    heading.style.marginTop = '20px';
+                    heading.style.marginBottom = '10px';
+                    heading.style.fontSize = '16px';
+                    heading.style.color = '#667eea';
+                    container.appendChild(heading);
+
+                    groupWrapper = document.createElement('div');
+                    groupWrapper.className = 'form-row';
+                    container.appendChild(groupWrapper);
+                }
+
+                if (!groupWrapper) {
+                    groupWrapper = document.createElement('div');
+                    groupWrapper.className = 'form-row';
+                    container.appendChild(groupWrapper);
+                }
+
+                const value = Object.prototype.hasOwnProperty.call(values, field.name) ? values[field.name] : field.default;
+                const fieldElement = createFieldElement(field, value);
+                groupWrapper.appendChild(fieldElement);
+            });
+        }
+
+        function createFieldElement(field, value) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-group';
+            const fieldId = `config-${field.name}`;
+            const fieldType = field.type || 'text';
+            const labelText = field.label || field.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+            if (fieldType === 'boolean') {
+                const checkboxGroup = document.createElement('div');
+                checkboxGroup.className = 'checkbox-group';
+
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.id = fieldId;
+                input.dataset.field = field.name;
+                input.checked = value !== undefined ? Boolean(value) : Boolean(field.default);
+
+                const label = document.createElement('label');
+                label.setAttribute('for', fieldId);
+                label.style.marginBottom = '0';
+                label.textContent = labelText;
+
+                checkboxGroup.appendChild(input);
+                checkboxGroup.appendChild(label);
+                wrapper.appendChild(checkboxGroup);
+
+                if (field.help_text) {
+                    const hint = document.createElement('small');
+                    hint.style.display = 'block';
+                    hint.style.marginTop = '5px';
+                    hint.style.color = '#888';
+                    hint.textContent = field.help_text;
+                    wrapper.appendChild(hint);
+                }
+
+                return wrapper;
+            }
+
+            const label = document.createElement('label');
+            label.setAttribute('for', fieldId);
+            label.textContent = labelText;
+            wrapper.appendChild(label);
+
+            let input;
+
+            if (fieldType === 'select') {
+                input = document.createElement('select');
+                (field.options || []).forEach(optionValue => {
+                    const option = document.createElement('option');
+                    option.value = optionValue;
+                    option.textContent = optionValue;
+                    option.selected = optionValue === value;
+                    input.appendChild(option);
+                });
+                if (!input.value && field.options && field.options.length) {
+                    input.value = field.options[0];
+                }
+            } else {
+                input = document.createElement('input');
+                if (fieldType === 'number') {
+                    input.type = 'number';
+                    const numberFormat = field.number_format || 'float';
+                    input.dataset.numberFormat = numberFormat;
+                    if (field.step !== undefined) {
+                        input.step = field.step;
+                    } else if (numberFormat === 'int') {
+                        input.step = 1;
+                    } else {
+                        input.step = '0.01';
+                    }
+                    if (field.min !== undefined) {
+                        input.min = field.min;
+                    }
+                    if (field.max !== undefined) {
+                        input.max = field.max;
+                    }
+                    if (value !== undefined && value !== '') {
+                        input.value = value;
+                    } else if (field.default !== undefined && field.default !== '') {
+                        input.value = field.default;
+                    }
+                } else if (fieldType === 'time') {
+                    input.type = 'time';
+                    input.value = value || field.default || '';
+                } else {
+                    input.type = 'text';
+                    input.value = value !== undefined ? value : (field.default || '');
+                }
+            }
+
+            if (field.placeholder) {
+                input.placeholder = field.placeholder;
+            }
+
+            input.id = fieldId;
+            input.dataset.field = field.name;
+            wrapper.appendChild(input);
+
+            if (field.help_text) {
+                const hint = document.createElement('small');
+                hint.style.display = 'block';
+                hint.style.marginTop = '5px';
+                hint.style.color = '#888';
+                hint.textContent = field.help_text;
+                wrapper.appendChild(hint);
+            }
+
+            if (field.name === 'symbol') {
+                const datalistId = `${fieldId}-options`;
+                input.setAttribute('list', datalistId);
+                const datalist = document.createElement('datalist');
+                datalist.id = datalistId;
+
+                const symbols = symbolOptions.length ? symbolOptions : DEFAULT_SYMBOLS;
+                [...new Set(symbols)].forEach(sym => {
+                    const option = document.createElement('option');
+                    option.value = sym;
+                    datalist.appendChild(option);
+                });
+
+                wrapper.appendChild(datalist);
+            }
+
+            return wrapper;
+        }
+
         async function saveConfig() {
-            const config = {
-                selected_strategy: document.getElementById('strategySelect').value,
-                api_key: document.getElementById('apiKey').value,
-                api_host: document.getElementById('apiHost').value,
-                symbol: document.getElementById('symbol').value,
-                exchange: document.getElementById('exchange').value,
-                product: document.getElementById('product').value,
-                lots: parseInt(document.getElementById('lots').value),
-                ema_fast: parseInt(document.getElementById('emaFast').value),
-                ema_slow: parseInt(document.getElementById('emaSlow').value),
-                atr_window: parseInt(document.getElementById('atrWindow').value),
-                atr_min_points: parseFloat(document.getElementById('atrMinPoints').value),
-                target_points: parseFloat(document.getElementById('targetPoints').value),
-                stoploss_points: parseFloat(document.getElementById('stoplossPoints').value),
-                daily_loss_cap: parseFloat(document.getElementById('dailyLossCap').value),
-                confirm_trend_at_entry: document.getElementById('confirmTrend').checked,
-                enable_eod_square_off: document.getElementById('eodSquareOff').checked,
-                square_off_time: document.getElementById('squareOffTime').value,
+            const strategy = availableStrategies.find(s => s.id === selectedStrategyId);
+            if (!strategy) {
+                alert('❌ Please select a strategy.');
+                return;
+            }
+
+            const schema = strategy.config_schema || [];
+            const payload = {
+                selected_strategy: selectedStrategyId,
                 is_paper_trading: !document.getElementById('paperTradingToggle').checked
             };
 
-            // Add trade_direction if supported by current strategy
-            if (hasTradeDirection) {
-                config.trade_direction = document.getElementById('tradeDirection').value;
-            }
+            schema.forEach(field => {
+                const selector = `[data-field="${field.name}"]`;
+                const input = document.querySelector(selector);
+                if (!input) {
+                    return;
+                }
+
+                const fieldType = field.type || 'text';
+                let value;
+
+                if (fieldType === 'boolean') {
+                    value = input.checked;
+                } else if (fieldType === 'number') {
+                    const raw = input.value;
+                    if (raw === '') {
+                        return;
+                    }
+                    const numberFormat = field.number_format || input.dataset.numberFormat || 'float';
+                    value = numberFormat === 'int' ? parseInt(raw, 10) : parseFloat(raw);
+                    if (Number.isNaN(value)) {
+                        return;
+                    }
+                } else {
+                    value = input.value;
+                    if (fieldType === 'time' && value === '') {
+                        return;
+                    }
+                }
+
+                payload[field.name] = value;
+            });
 
             try {
                 const response = await fetch('/api/config', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(config)
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
                 if (data.success) {
                     alert('✅ Configuration saved successfully!');
+                    await loadConfig();
                 } else {
                     alert('❌ Error: ' + data.error);
                 }
