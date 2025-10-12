@@ -22,7 +22,7 @@ Order Constants: Exchange/Product/PriceType follow OpenAlgo.
 from __future__ import annotations
 import os, sys, time, json, logging, signal
 from dataclasses import dataclass, asdict
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 from datetime import datetime, time as dtime, timedelta
 
 import pytz
@@ -201,16 +201,18 @@ def is_square_off_time(cfg: Config, t: dtime) -> bool:
     return (t.hour, t.minute) >= (sh, sm)
 
 # Symbol helpers
-def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> int:
+def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> Tuple[int, float]:
     sym = (symbol or cfg.symbol).upper()
+    tick_size = None
     try:
         result = client.search(query=sym, exchange=cfg.exchange)
         if result.get('status') == 'success':
             for inst in result.get('data', []):
                 if inst.get('symbol', '').upper() == sym:
                     lot = int(inst.get('lotsize') or 1)
+                    tick_size = float(inst.get('tick_size') or 0.05)
                     log(f"[{STRATEGY_NAME}] Resolved lot size for {sym} via API: {lot}")
-                    return cfg.lots * lot
+                    return cfg.lots * lot, tick_size
     except Exception as e:
         log(f"[{STRATEGY_NAME}] [WARN] resolve_quantity API failed: {e}")
 
@@ -218,10 +220,10 @@ def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> int:
         if sym.startswith(idx):
             lot = INDEX_LOT_SIZES[idx]
             log(f"[{STRATEGY_NAME}] Using fallback lot size for {sym} (detected {idx}): {lot}")
-            return cfg.lots * lot
+            return cfg.lots * lot, tick_size or 0.05
 
     log(f"[{STRATEGY_NAME}] [WARN] Could not determine lot size for {sym}, using default 1")
-    return cfg.lots * 1
+    return cfg.lots * 1, tick_size or 0.05
 
 def validate_symbol(client, symbol: str, exchange: str) -> bool:
     try:
@@ -254,8 +256,11 @@ def get_history(client, cfg: Config, symbol: Optional[str] = None) -> pd.DataFra
     sym = symbol or cfg.symbol
     start_date = cfg.history_start_date or (now_ist().date() - timedelta(days=2)).strftime('%Y-%m-%d')
     end_date = cfg.history_end_date or (now_ist().date() - timedelta(days=1)).strftime('%Y-%m-%d')
-    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} {cfg.interval} {start_date}→{end_date}")
-    df = client.history(symbol=sym, exchange=cfg.exchange, interval=cfg.interval,
+    interval = cfg.interval.upper()
+    if interval in {"1D", "D", "DAY", "DAILY"}:
+        interval = "D"
+    log(f"[{STRATEGY_NAME}] [HISTORY] Fetching {sym}@{cfg.exchange} {interval} {start_date}→{end_date}")
+    df = client.history(symbol=sym, exchange=cfg.exchange, interval=interval,
                         start_date=start_date, end_date=end_date)
     if isinstance(df, pd.DataFrame):
         if 'timestamp' not in df.columns:
@@ -278,11 +283,11 @@ class RandomScalpBot:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.client = openalgo.simulator(api_key=cfg.api_key) if cfg.test_mode else openalgo.api(api_key=cfg.api_key, host=cfg.api_host, ws_url=cfg.ws_url)
-        self.scheduler = BackgroundScheduler(timezone=IST)
+        self.scheduler = BackgroundScheduler(timezone=IST, job_defaults={'max_instances': 1, 'coalesce': True, 'misfire_grace_time': 30})
         _ensure_file_logging(cfg)
 
         # State
-        self.qty: int = resolve_quantity(self.client, cfg, symbol=cfg.symbol)
+        self.qty, self.tick_size = resolve_quantity(self.client, cfg, symbol=cfg.symbol)
         self.in_position: bool = False
         self.side: Optional[str] = None
         self.entry_price: Optional[float] = None
@@ -309,6 +314,13 @@ class RandomScalpBot:
             return 60  # treat as hourly boundary, but we never schedule daily here
         return 5
 
+    def _round_to_tick(self, price: float) -> float:
+        tick = self.tick_size or 0.05
+        if tick <= 0:
+            tick = 0.05
+        rounded = round(round(price / tick) * tick, 2)
+        return rounded
+
     # ---- Bar close: set signal every N bars
     def on_bar_close(self):
         now = now_ist()
@@ -329,9 +341,18 @@ class RandomScalpBot:
             log(f"[{STRATEGY_NAME}] [WARN] quotes failed: {e}")
 
         if self.bar_counter % max(self.cfg.trade_every_n_bars, 1) == 0:
-            self.pending_signal = True
+            if self.in_position:
+                log(f"[{STRATEGY_NAME}] [NO_SIGNAL] in position, skip queuing")
+                return
             iv = self._parse_interval_minutes(self.cfg.interval)
-            self.next_entry_time = (now + timedelta(minutes=iv)).replace(second=1, microsecond=0)
+            next_time = (now + timedelta(minutes=iv)).replace(second=1, microsecond=0)
+            so_h, so_m = self.cfg.square_off_time
+            square_off_dt = now.replace(hour=so_h, minute=so_m, second=0, microsecond=0)
+            if next_time >= square_off_dt:
+                log(f"[{STRATEGY_NAME}] [NO_SIGNAL] next entry {next_time.time()} >= square-off; skipping")
+                return
+            self.pending_signal = True
+            self.next_entry_time = next_time
             log(f"[{STRATEGY_NAME}] ⚡ [SIGNAL] LONG queued for next bar open @ {self.next_entry_time}")
         else:
             log(f"[{STRATEGY_NAME}] [NO_SIGNAL] waiting…")
@@ -351,6 +372,15 @@ class RandomScalpBot:
 
     # ---- Orders
 
+    @staticmethod
+    def _is_complete(resp: Dict[str, Any]) -> bool:
+        return str(resp.get('data', {}).get('order_status', '')).upper() == 'COMPLETE'
+
+    @staticmethod
+    def _is_rejected(resp: Dict[str, Any]) -> bool:
+        status = str(resp.get('data', {}).get('order_status', '')).upper()
+        return 'REJECT' in status or 'CANCELLED' in status
+
     def check_order_status(self):
         """Poll sibling orders to implement OCO safety."""
         if not self.in_position:
@@ -360,12 +390,13 @@ class RandomScalpBot:
             if self.tp_order_id:
                 resp = self.client.orderstatus(order_id=self.tp_order_id, strategy=STRATEGY_NAME)
                 if resp.get('status') == 'success':
-                    status = str(resp.get('data', {}).get('order_status', '')).upper()
-                    if status == 'COMPLETE':
+                    if self._is_complete(resp):
                         price = float(resp.get('data', {}).get('average_price', 0) or 0)
                         self.cancel_order_silent(self.sl_order_id)
                         self._realize_exit(price, "Target Hit")
                         return
+                    if self._is_rejected(resp):
+                        log(f"[{STRATEGY_NAME}] [WARN] TP rejected; keeping SL active")
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] TP status check failed: {e}")
 
@@ -373,17 +404,20 @@ class RandomScalpBot:
             if self.sl_order_id:
                 resp = self.client.orderstatus(order_id=self.sl_order_id, strategy=STRATEGY_NAME)
                 if resp.get('status') == 'success':
-                    status = str(resp.get('data', {}).get('order_status', '')).upper()
-                    if status == 'COMPLETE':
+                    if self._is_complete(resp):
                         price = float(resp.get('data', {}).get('average_price', 0) or 0)
                         self.cancel_order_silent(self.tp_order_id)
                         self._realize_exit(price, "Stoploss Hit")
                         return
+                    if self._is_rejected(resp):
+                        log(f"[{STRATEGY_NAME}] [WARN] SL rejected; keeping TP active")
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] SL status check failed: {e}")
 
     def place_entry(self):
         try:
+            if self.in_position:
+                return
             action = "BUY"  # long-only to mirror backtest
             log(f"[{STRATEGY_NAME}] 🚀 [ENTRY] {action} {self.cfg.symbol} x {self.qty}")
             resp = self.client.placeorder(
@@ -412,8 +446,8 @@ class RandomScalpBot:
                 return
 
             # Compute exits (fixed rupees from backtest)
-            self.tp_level = round(self.entry_price + self.cfg.profit_target_rupees, 2)
-            self.sl_level = round(self.entry_price - self.cfg.stop_loss_rupees, 2)
+            self.tp_level = self._round_to_tick(self.entry_price + self.cfg.profit_target_rupees)
+            self.sl_level = self._round_to_tick(self.entry_price - self.cfg.stop_loss_rupees)
             self.in_position = True
             self.side = 'LONG'
             self.pending_signal = False
@@ -460,7 +494,7 @@ class RandomScalpBot:
         if not oid:
             return
         try:
-            self.client.cancelorder(order_id=oid)
+            self.client.cancelorder(order_id=oid, strategy=STRATEGY_NAME)
             log(f"[{STRATEGY_NAME}] [CANCEL] order_id={oid}")
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] cancel failed: {e}")
@@ -489,6 +523,8 @@ class RandomScalpBot:
             return
         try:
             action = 'SELL'  # long-only
+            self.cancel_order_silent(self.tp_order_id)
+            self.cancel_order_silent(self.sl_order_id)
             resp = self.client.placeorder(
                 strategy=STRATEGY_NAME,
                 symbol=self.cfg.symbol,
@@ -513,6 +549,49 @@ class RandomScalpBot:
             log(f"[{STRATEGY_NAME}] [EOD] Exception: {e}")
 
     # ---- State
+    def _load_state(self):
+        if not self.cfg.persist_state:
+            return
+        try:
+            with open(f"{STRATEGY_NAME}_state.json") as f:
+                state = json.load(f)
+        except FileNotFoundError:
+            return
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] load_state failed: {e}")
+            return
+
+        self.in_position = bool(state.get("in_position", False))
+        self.side = state.get("side")
+        self.entry_price = state.get("entry_price")
+        self.tp_level = state.get("tp_level")
+        self.sl_level = state.get("sl_level")
+        self.qty = state.get("qty", self.qty)
+        self.tp_order_id = state.get("tp_order_id")
+        self.sl_order_id = state.get("sl_order_id")
+        self.realized_pnl_today = state.get("realized_pnl_today", 0.0)
+        self.pending_signal = False
+
+        if self.in_position:
+            for label, oid in (("TP", self.tp_order_id), ("SL", self.sl_order_id)):
+                if not oid:
+                    continue
+                try:
+                    resp = self.client.orderstatus(order_id=oid, strategy=STRATEGY_NAME)
+                    if resp.get('status') != 'success':
+                        continue
+                    if self._is_complete(resp):
+                        price = float(resp.get('data', {}).get('average_price', 0) or 0)
+                        other_oid = self.sl_order_id if label == "TP" else self.tp_order_id
+                        self.cancel_order_silent(other_oid)
+                        reason = "Target Hit (recovered)" if label == "TP" else "Stoploss Hit (recovered)"
+                        self._realize_exit(price or (self.entry_price or 0), reason)
+                        break
+                    if self._is_rejected(resp):
+                        log(f"[{STRATEGY_NAME}] [WARN] {label} order rejected during recovery; monitoring sibling")
+                except Exception as e:
+                    log(f"[{STRATEGY_NAME}] [WARN] {label} status recovery failed: {e}")
+
     def _persist(self):
         if not self.cfg.persist_state:
             return
@@ -541,6 +620,8 @@ class RandomScalpBot:
         self.entry_order_id = None
         self.tp_order_id = None
         self.sl_order_id = None
+        self.pending_signal = False
+        self.next_entry_time = None
 
     # ---- Lifecycle
     def start(self):
@@ -553,6 +634,8 @@ class RandomScalpBot:
         if not validate_symbol(self.client, self.cfg.symbol, self.cfg.exchange):
             log(f"[{STRATEGY_NAME}] [FATAL] Symbol validation failed")
             sys.exit(1)
+
+        self._load_state()
 
         # Schedule bar close/open ticks
         interval_str = self.cfg.interval.strip().lower()
@@ -600,6 +683,8 @@ class RandomScalpBot:
         log(f"\n[{STRATEGY_NAME}] Shutting down…")
         try:
             if self.in_position:
+                self.cancel_order_silent(self.tp_order_id)
+                self.cancel_order_silent(self.sl_order_id)
                 self.client.placeorder(
                     strategy=STRATEGY_NAME,
                     symbol=self.cfg.symbol,
@@ -611,11 +696,6 @@ class RandomScalpBot:
                 )
         except Exception as e:
             log(f"[{STRATEGY_NAME}] [WARN] close-on-exit failed: {e}")
-        try:
-            self.cancel_order_silent(self.tp_order_id)
-            self.cancel_order_silent(self.sl_order_id)
-        except Exception:
-            pass
         try:
             self.scheduler.shutdown(wait=False)
         except Exception:
