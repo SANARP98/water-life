@@ -20,7 +20,7 @@ Notes:
 Order Constants: Exchange/Product/PriceType follow OpenAlgo.
 """
 from __future__ import annotations
-import os, sys, time, json, logging, signal
+import os, sys, time, json, logging, signal, threading
 from dataclasses import dataclass, asdict
 from typing import Optional, Tuple, Dict, Any
 from datetime import datetime, time as dtime, timedelta
@@ -1219,8 +1219,11 @@ class RandomScalpBot:
         self.scheduler.add_job(self.reconcile_position, 'interval', seconds=30, max_instances=1)
 
         # Graceful shutdown
-        signal.signal(signal.SIGINT, self._graceful_exit)
-        signal.signal(signal.SIGTERM, self._graceful_exit)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, self._graceful_exit)
+            signal.signal(signal.SIGTERM, self._graceful_exit)
+        else:
+            log(f"[{STRATEGY_NAME}] [WARN] Signal handlers not registered (not running on main thread)")
 
         self.scheduler.start()
         log(f"[{STRATEGY_NAME}] Scheduler started @ interval={interval_label}")

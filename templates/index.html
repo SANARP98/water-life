@@ -2130,10 +2130,10 @@
 
                 const data = await response.json();
                 if (data.success) {
-                    alert('✅ Configuration saved successfully!');
+                    currentStrategy = payload.selected_strategy;
                     await loadConfig();
-                    // Update config display with new values
-                    updateConfigDisplay(currentConfigValues, selectedStrategyId);
+                    updateConfigDisplay(currentConfigValues, currentStrategy);
+                    alert('✅ Configuration saved successfully!');
                     closeConfigModal();
                 } else {
                     alert('❌ Error: ' + data.error);
