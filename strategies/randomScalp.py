@@ -201,18 +201,20 @@ def is_square_off_time(cfg: Config, t: dtime) -> bool:
     return (t.hour, t.minute) >= (sh, sm)
 
 # Symbol helpers
-def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> Tuple[int, float]:
+def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> Tuple[int, float, int]:
     sym = (symbol or cfg.symbol).upper()
     tick_size = None
+    lot_size = None
     try:
         result = client.search(query=sym, exchange=cfg.exchange)
         if result.get('status') == 'success':
             for inst in result.get('data', []):
                 if inst.get('symbol', '').upper() == sym:
                     lot = int(inst.get('lotsize') or 1)
+                    lot_size = lot
                     tick_size = float(inst.get('tick_size') or 0.05)
                     log(f"[{STRATEGY_NAME}] Resolved lot size for {sym} via API: {lot}")
-                    return cfg.lots * lot, tick_size
+                    return cfg.lots * lot, tick_size, lot
     except Exception as e:
         log(f"[{STRATEGY_NAME}] [WARN] resolve_quantity API failed: {e}")
 
@@ -220,10 +222,10 @@ def resolve_quantity(client, cfg: Config, symbol: Optional[str] = None) -> Tuple
         if sym.startswith(idx):
             lot = INDEX_LOT_SIZES[idx]
             log(f"[{STRATEGY_NAME}] Using fallback lot size for {sym} (detected {idx}): {lot}")
-            return cfg.lots * lot, tick_size or 0.05
+            return cfg.lots * lot, tick_size or 0.05, lot
 
     log(f"[{STRATEGY_NAME}] [WARN] Could not determine lot size for {sym}, using default 1")
-    return cfg.lots * 1, tick_size or 0.05
+    return cfg.lots * 1, tick_size or 0.05, lot_size or 1
 
 def validate_symbol(client, symbol: str, exchange: str) -> bool:
     try:
@@ -287,7 +289,15 @@ class RandomScalpBot:
         _ensure_file_logging(cfg)
 
         # State
-        self.qty, self.tick_size = resolve_quantity(self.client, cfg, symbol=cfg.symbol)
+        self.qty, self.tick_size, self.base_lot_size = resolve_quantity(self.client, cfg, symbol=cfg.symbol)
+        if self.base_lot_size <= 0:
+            self.base_lot_size = 1
+        if self.qty % self.base_lot_size != 0:
+            adjusted_qty = (self.qty // self.base_lot_size) * self.base_lot_size
+            if adjusted_qty == 0:
+                adjusted_qty = self.base_lot_size
+            log(f"[{STRATEGY_NAME}] [WARN] Quantity {self.qty} not multiple of lot size {self.base_lot_size}; adjusting to {adjusted_qty}")
+            self.qty = adjusted_qty
         self.in_position: bool = False
         self.side: Optional[str] = None
         self.entry_price: Optional[float] = None
@@ -380,6 +390,52 @@ class RandomScalpBot:
     def _is_rejected(resp: Dict[str, Any]) -> bool:
         status = str(resp.get('data', {}).get('order_status', '')).upper()
         return 'REJECT' in status or 'CANCELLED' in status
+
+    def _ensure_flat_position(self, context: str) -> None:
+        """Verify broker position book is flat; attempt corrective order if not."""
+        if not hasattr(self.client, "positionbook"):
+            return
+        try:
+            resp = self.client.positionbook()
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] positionbook call failed during {context}: {e}")
+            return
+
+        if not isinstance(resp, dict) or resp.get('status') != 'success':
+            log(f"[{STRATEGY_NAME}] [WARN] positionbook not available during {context}: {resp}")
+            return
+
+        positions = resp.get('data', []) or []
+        symbol_upper = (self.cfg.symbol or "").upper()
+        residual_qty = 0
+        for pos in positions:
+            pos_symbol = str(pos.get('symbol', '')).upper()
+            if pos_symbol != symbol_upper:
+                continue
+            residual_qty = int(pos.get('netqty') or pos.get('net_qty') or pos.get('quantity') or 0)
+            break
+
+        if residual_qty == 0:
+            return
+
+        log(f"[{STRATEGY_NAME}] [WARN] Residual net position {residual_qty} detected during {context}; sending corrective order")
+        corrective_action = 'SELL' if residual_qty > 0 else 'BUY'
+        corrective_qty = abs(residual_qty)
+        if self.base_lot_size > 0 and corrective_qty % self.base_lot_size != 0:
+            corrective_qty = ((corrective_qty // self.base_lot_size) + 1) * self.base_lot_size
+        try:
+            self.client.placeorder(
+                strategy=STRATEGY_NAME,
+                symbol=self.cfg.symbol,
+                exchange=self.cfg.exchange,
+                product=self.cfg.product,
+                action=corrective_action,
+                price_type="MARKET",
+                quantity=corrective_qty,
+            )
+            log(f"[{STRATEGY_NAME}] [WARN] Corrective {corrective_action} {corrective_qty} order submitted to flatten residual position")
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [ERROR] Corrective flatten failed: {e}")
 
     def check_order_status(self):
         """Poll sibling orders to implement OCO safety."""
@@ -484,6 +540,22 @@ class RandomScalpBot:
                 trigger_price=self.sl_level,
                 quantity=self.qty,
             )
+            if sl.get('status') != 'success':
+                fallback_price = max(self.sl_level - (self.tick_size or 0.05), 0.0)
+                log(f"[{STRATEGY_NAME}] [WARN] SL-M rejected ({sl}); retrying with SL @ {fallback_price:.2f}")
+                sl = self.client.placeorder(
+                    strategy=STRATEGY_NAME,
+                    symbol=self.cfg.symbol,
+                    exchange=self.cfg.exchange,
+                    product=self.cfg.product,
+                    action="SELL",
+                    price_type="SL",
+                    price=fallback_price,
+                    trigger_price=self.sl_level,
+                    quantity=self.qty,
+                )
+                if sl.get('status') != 'success':
+                    log(f"[{STRATEGY_NAME}] [ERROR] SL fallback order failed: {sl}")
             self.tp_order_id = tp.get('orderid')
             self.sl_order_id = sl.get('orderid')
             log(f"[{STRATEGY_NAME}] [EXITS] TP oid={self.tp_order_id} @{self.tp_level:.2f} | SL oid={self.sl_order_id} @{self.sl_level:.2f}")
@@ -512,6 +584,7 @@ class RandomScalpBot:
         log(f"[{STRATEGY_NAME}] {emoji} [EXIT] {reason} | Entry ₹{self.entry_price:.2f} → Exit ₹{exit_price:.2f} | Gross ₹{gross:+.2f} | Costs ₹{costs:.2f} | Net ₹{net:+.2f} | Day ₹{self.realized_pnl_today:+.2f}")
         self._flat_state()
         self._persist()
+        self._ensure_flat_position(reason)
 
     def square_off(self):
         now = now_ist()
@@ -591,6 +664,8 @@ class RandomScalpBot:
                         log(f"[{STRATEGY_NAME}] [WARN] {label} order rejected during recovery; monitoring sibling")
                 except Exception as e:
                     log(f"[{STRATEGY_NAME}] [WARN] {label} status recovery failed: {e}")
+        else:
+            self._ensure_flat_position("startup")
 
     def _persist(self):
         if not self.cfg.persist_state:
@@ -700,6 +775,7 @@ class RandomScalpBot:
             self.scheduler.shutdown(wait=False)
         except Exception:
             pass
+        self._ensure_flat_position("graceful_exit")
         log(f"[{STRATEGY_NAME}] Bye.")
         sys.exit(0)
 
