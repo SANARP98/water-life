@@ -35,5 +35,5 @@ EXPOSE 7777
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7777').read()" || exit 1
 
-# Default command - run web server
-CMD ["python3", "web_server.py"]
+# Default command - run web server with Gunicorn + eventlet
+CMD ["gunicorn", "--worker-class", "eventlet", "--workers", "1", "--bind", "0.0.0.0:7777", "web_server:app"]
