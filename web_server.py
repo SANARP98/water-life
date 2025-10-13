@@ -39,7 +39,13 @@ print(f"[INFO] Loaded {len(STRATEGY_REGISTRY)} strategies: {', '.join(STRATEGY_R
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'scalping-strategy-secret-key'
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+_default_async_mode = os.getenv("SOCKETIO_ASYNC_MODE", "eventlet")
+try:
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_default_async_mode)
+except ValueError:
+    # Fallback if requested async mode is unavailable (e.g., missing eventlet)
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Setup rate limiting if available
 if RATE_LIMITING_AVAILABLE:
@@ -55,6 +61,15 @@ else:
 
 IST = pytz.timezone("Asia/Kolkata")
 DEFAULT_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50', 'SENSEX', 'BANKEX', 'SENSEX50']
+
+_background_status_task = None
+
+
+def ensure_background_tasks():
+    """Start long-lived background jobs once per worker."""
+    global _background_status_task
+    if _background_status_task is None:
+        _background_status_task = socketio.start_background_task(background_status_pusher)
 
 
 def parse_config_value(field_schema, raw_value):
@@ -490,6 +505,7 @@ class PaperTradingBot:
 
 @socketio.on('connect')
 def handle_connect():
+    ensure_background_tasks()
     emit('connected', {'message': 'Connected to strategy server'})
     custom_print("[WS] Client connected")
 
@@ -529,10 +545,10 @@ def main():
     custom_print("=" * 60)
 
     # Start background task
-    socketio.start_background_task(background_status_pusher)
+    ensure_background_tasks()
 
     # Run server
-    socketio.run(app, host='0.0.0.0', port=7777, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=7777, debug=False)
 
 if __name__ == '__main__':
     main()
