@@ -145,7 +145,7 @@ class Config:
     ws_url: Optional[str] = os.getenv("OPENALGO_WS_URL", "ws://127.0.0.1:8765")
 
     # Instrument
-    symbol: str = os.getenv("SYMBOL", "NIFTY24OCT2524500CE")  # Use an actual tradable symbol
+    symbol: str = os.getenv("SYMBOL", "NIFTY24OCT2525000CE")  # Use an actual tradable symbol
     exchange: str = os.getenv("EXCHANGE", "NFO")               # e.g., NSE, NFO, BSE, MCX
     product: str = os.getenv("PRODUCT", "MIS")                  # MIS / CNC / NRML
     lots: int = int(os.getenv("LOTS", 1))                       # multiplier over lotsize
@@ -362,6 +362,7 @@ class RandomScalpBot:
         self.exit_lock = Lock()  # OCO race condition protection
 
         self.realized_pnl_today: float = 0.0
+        self.running: bool = False  # Control flag for main loop
 
     # ---- Time helpers
     def _parse_interval_minutes(self, interval: str) -> int:
@@ -1226,22 +1227,30 @@ class RandomScalpBot:
             log(f"[{STRATEGY_NAME}] [WARN] Signal handlers not registered (not running on main thread)")
 
         self.scheduler.start()
+        self.running = True
         log(f"[{STRATEGY_NAME}] Scheduler started @ interval={interval_label}")
 
-        # Idle loop to keep process alive
+        # Idle loop to keep process alive (stoppable via self.running flag)
         try:
-            while True:
+            while self.running:
                 time.sleep(1)
         except KeyboardInterrupt:
             self._graceful_exit()
 
-    def _graceful_exit(self, *args):
-        log(f"\n[{STRATEGY_NAME}] Shutting down…")
+        log(f"[{STRATEGY_NAME}] Main loop exited (running={self.running})")
+
+    def pause(self):
+        """Pause the strategy without exiting the process. Closes any open positions."""
+        log(f"\n[{STRATEGY_NAME}] Pausing strategy…")
+
+        # Stop the running flag to exit main loop
+        self.running = False
+
         exit_confirmed = False
         try:
             if self.in_position:
                 qty_to_close = self.actual_filled_qty if self.actual_filled_qty > 0 else self.qty
-                log(f"[{STRATEGY_NAME}] [SHUTDOWN] Closing position qty={qty_to_close} before exit")
+                log(f"[{STRATEGY_NAME}] [PAUSE] Closing position qty={qty_to_close}")
 
                 # Cancel exit legs first
                 self.cancel_order_silent(self.tp_order_id)
@@ -1272,7 +1281,7 @@ class RandomScalpBot:
                                     # Fallback to LTP
                                     q = self.client.quotes(symbol=self.cfg.symbol, exchange=self.cfg.exchange)
                                     exit_price = float(q.get('data',{}).get('ltp') or self.entry_price or 0)
-                                self._realize_exit(exit_price, "Graceful Shutdown")
+                                self._realize_exit(exit_price, "Strategy Paused")
                                 exit_confirmed = True
                                 break
                         except Exception as e:
@@ -1291,8 +1300,8 @@ class RandomScalpBot:
                             quantity=qty_to_close,
                         )
                         if retry_resp and retry_resp.get('status') == 'success':
-                            log(f"[{STRATEGY_NAME}] [ESCALATE] Retry order placed, keeping process alive for 30s with reconciliation...")
-                            # Keep process alive for 30 more seconds with reconciliation running
+                            log(f"[{STRATEGY_NAME}] [ESCALATE] Retry order placed, checking reconciliation...")
+                            # Keep checking for 30 more seconds with reconciliation running
                             for _ in range(12):  # 12 × 2.5s = 30s
                                 time.sleep(2.5)
                                 self.reconcile_position()
@@ -1301,28 +1310,41 @@ class RandomScalpBot:
                                     break
 
                         if not exit_confirmed:
-                            log(f"[{STRATEGY_NAME}] [CRITICAL] STILL IN POSITION AFTER SHUTDOWN ATTEMPTS!")
+                            log(f"[{STRATEGY_NAME}] [CRITICAL] STILL IN POSITION AFTER PAUSE ATTEMPTS!")
                             log(f"[{STRATEGY_NAME}] [CRITICAL] Manual intervention may be required - check broker platform!")
                         else:
                             log(f"[{STRATEGY_NAME}] Position confirmed closed via reconciliation")
                 else:
-                    log(f"[{STRATEGY_NAME}] [ERROR] Shutdown close order failed: {resp}")
+                    log(f"[{STRATEGY_NAME}] [ERROR] Pause close order failed: {resp}")
         except Exception as e:
-            log(f"[{STRATEGY_NAME}] [ERROR] close-on-exit failed: {e}")
+            log(f"[{STRATEGY_NAME}] [ERROR] close-on-pause failed: {e}")
 
         # Final position reconciliation
         try:
-            self._ensure_flat_position("graceful_exit")
+            self._ensure_flat_position("pause")
         except Exception as e:
-            log(f"[{STRATEGY_NAME}] [WARN] Final position check failed: {e}")
+            log(f"[{STRATEGY_NAME}] [WARN] Final position check during pause failed: {e}")
 
+        # Stop the scheduler but don't exit the process
         try:
-            self.scheduler.shutdown(wait=False)
-        except Exception:
-            pass
+            if self.scheduler.running:
+                self.scheduler.shutdown(wait=False)
+                log(f"[{STRATEGY_NAME}] Scheduler stopped")
+        except Exception as e:
+            log(f"[{STRATEGY_NAME}] [WARN] Scheduler shutdown error: {e}")
 
-        log(f"[{STRATEGY_NAME}] Bye.")
-        sys.exit(0)
+        log(f"[{STRATEGY_NAME}] Strategy paused successfully")
+
+    def _graceful_exit(self, *args):
+        """Handle process termination signals (SIGINT, SIGTERM)"""
+        log(f"\n[{STRATEGY_NAME}] Shutting down…")
+        self.pause()  # Reuse pause logic to close positions
+        log(f"[{STRATEGY_NAME}] Shutdown complete")
+
+        # Only call sys.exit if we're handling a signal (not called from web server)
+        if args:  # Signal handlers pass arguments
+            log(f"[{STRATEGY_NAME}] Bye.")
+            sys.exit(0)
 
 # ----------------------------
 # Entrypoint

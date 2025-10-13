@@ -1490,6 +1490,16 @@
                 </div>
             </div>
 
+            <!-- P&L Chart -->
+            <div class="card">
+                <h2>
+                    <span>📈 P&L Chart</span>
+                </h2>
+                <div style="position: relative; height: 250px;">
+                    <canvas id="pnlChart"></canvas>
+                </div>
+            </div>
+
             <!-- Logs Panel - Full Width -->
             <div class="card">
                 <div class="logs-header">
@@ -1612,8 +1622,13 @@
     <div id="shortcutsOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 1999;" onclick="hideShortcuts()"></div>
 
     <script>
-        // WebSocket connection
-        const socket = io();
+        // WebSocket connection with reconnection logic
+        const socket = io({
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+        });
 
         const DEFAULT_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50', 'SENSEX', 'BANKEX', 'SENSEX50'];
 
@@ -1627,6 +1642,82 @@
         let allLogs = [];
         let legendExpanded = true;
         let configDisplayExpanded = true;
+        let statusUpdateTimer = null;  // For debouncing
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        let pnlChart = null;
+        let pnlData = { labels: [], data: [] };
+        let lastPnL = null;
+
+        // Initialize P&L Chart
+        function initPnLChart() {
+            const ctx = document.getElementById('pnlChart').getContext('2d');
+            pnlChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: pnlData.labels,
+                    datasets: [{
+                        label: 'Daily P&L (₹)',
+                        data: pnlData.data,
+                        borderColor: 'rgb(16, 185, 129)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },  // Disable animation for performance
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₹' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update P&L Chart
+        function updatePnLChart(timestamp, pnl) {
+            if (!pnlChart) {
+                initPnLChart();
+            }
+
+            // Only update if P&L changed
+            if (pnl !== lastPnL) {
+                const timeStr = timestamp ? timestamp.split(' ')[1] : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+                pnlData.labels.push(timeStr);
+                pnlData.data.push(pnl);
+
+                // Keep only last 50 data points for performance
+                if (pnlData.labels.length > 50) {
+                    pnlData.labels.shift();
+                    pnlData.data.shift();
+                }
+
+                // Update chart color based on P&L
+                const color = pnl >= 0 ? 'rgb(16, 185, 129)' : 'rgb(239, 68, 68)';
+                pnlChart.data.datasets[0].borderColor = color;
+                pnlChart.data.datasets[0].backgroundColor = pnl >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+
+                pnlChart.update('none');  // Update without animation
+                lastPnL = pnl;
+            }
+        }
 
         // Detect OS and update keyboard shortcuts
         function detectOS() {
@@ -1789,6 +1880,17 @@
 
         socket.on('connect', async function() {
             console.log('Connected to server');
+            reconnectAttempts = 0;  // Reset on successful connection
+
+            // Show reconnection notification if this was a reconnect
+            if (reconnectAttempts > 0) {
+                addLog({
+                    timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+                    level: 'INFO',
+                    message: '✅ Reconnected to server'
+                });
+            }
+
             detectOS();
             loadLegendPreference();
             loadConfigDisplayPreference();
@@ -1796,12 +1898,38 @@
             await loadConfig();
         });
 
+        socket.on('disconnect', function(reason) {
+            console.log('Disconnected from server:', reason);
+            addLog({
+                timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+                level: 'WARNING',
+                message: '⚠️ Connection lost. Attempting to reconnect...'
+            });
+        });
+
+        socket.on('reconnect_attempt', function(attemptNumber) {
+            reconnectAttempts = attemptNumber;
+            console.log(`Reconnection attempt ${attemptNumber}/${maxReconnectAttempts}`);
+        });
+
+        socket.on('reconnect_failed', function() {
+            addLog({
+                timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+                level: 'ERROR',
+                message: '❌ Failed to reconnect. Please refresh the page.'
+            });
+        });
+
         socket.on('log', function(data) {
             addLog(data);
         });
 
+        // Debounced status update (only update every 100ms max)
         socket.on('status_update', function(data) {
-            updateStatus(data);
+            clearTimeout(statusUpdateTimer);
+            statusUpdateTimer = setTimeout(() => {
+                updateStatus(data);
+            }, 100);
         });
 
         async function loadStrategies() {
@@ -2177,7 +2305,7 @@
             }
         }
 
-        // Update status display
+        // Update status display (optimized)
         function updateStatus(data) {
             const statusBadge = document.getElementById('statusBadge');
             const strategyBadge = document.getElementById('strategyBadge');
@@ -2221,6 +2349,9 @@
             dailyPnl.textContent = '₹' + pnl.toFixed(2);
             dailyPnl.className = 'position-value ' + (pnl >= 0 ? 'pnl-positive' : 'pnl-negative');
 
+            // Update P&L chart
+            updatePnLChart(data.last_update, pnl);
+
             pendingSignal.textContent = data.pending_signal || '-';
             lastUpdate.textContent = data.last_update || '-';
 
@@ -2233,31 +2364,55 @@
             document.getElementById('stopBtn').disabled = !isRunning;
         }
 
-        // Add log entry
+        // Optimized log rendering with batching
+        let logBatch = [];
+        let logBatchTimer = null;
+
         function addLog(data) {
+            logBatch.push(data);
+
+            // Batch log rendering for performance (render every 50ms max)
+            clearTimeout(logBatchTimer);
+            logBatchTimer = setTimeout(() => {
+                flushLogBatch();
+            }, 50);
+        }
+
+        function flushLogBatch() {
+            if (logBatch.length === 0) return;
+
             const logsBox = document.getElementById('logsBox');
-            const logEntry = document.createElement('div');
-            const levelClass = 'log-' + (data.level || 'info').toLowerCase();
-            logEntry.className = 'log-entry ' + levelClass;
+            const fragment = document.createDocumentFragment();
 
-            logEntry.innerHTML = `
-                <span class="log-timestamp">[${data.timestamp}]</span>
-                <span>${data.message}</span>
-            `;
+            logBatch.forEach(data => {
+                const logEntry = document.createElement('div');
+                const levelClass = 'log-' + (data.level || 'info').toLowerCase();
+                logEntry.className = 'log-entry ' + levelClass;
 
-            // Store log for filtering
-            allLogs.push({ element: logEntry, text: data.message.toLowerCase() });
+                logEntry.innerHTML = `
+                    <span class="log-timestamp">[${data.timestamp}]</span>
+                    <span>${data.message}</span>
+                `;
 
-            logsBox.appendChild(logEntry);
+                // Store log for filtering
+                allLogs.push({ element: logEntry, text: data.message.toLowerCase() });
+                fragment.appendChild(logEntry);
+            });
 
-            if (autoScroll) {
-                logsBox.scrollTop = logsBox.scrollHeight;
-            }
+            logsBox.appendChild(fragment);
+            logBatch = [];
 
-            // Keep only last 500 logs
+            // Keep only last 500 logs (optimize DOM size)
             while (logsBox.children.length > 500) {
                 logsBox.removeChild(logsBox.firstChild);
                 allLogs.shift();
+            }
+
+            // Smooth auto-scroll using RAF
+            if (autoScroll) {
+                requestAnimationFrame(() => {
+                    logsBox.scrollTop = logsBox.scrollHeight;
+                });
             }
         }
 
@@ -2354,13 +2509,10 @@
 
         document.getElementById('paperTradingToggle').addEventListener('change', updateModeLabel);
 
-        // Auto-scroll logs (only if enabled)
-        setInterval(() => {
-            if (autoScroll) {
-                const logsBox = document.getElementById('logsBox');
-                logsBox.scrollTop = logsBox.scrollHeight;
-            }
-        }, 1000);
+        // Initialize P&L chart on page load
+        window.addEventListener('load', () => {
+            initPnLChart();
+        });
     </script>
 </body>
 </html>
